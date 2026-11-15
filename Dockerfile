@@ -2,7 +2,7 @@
 # Model files come from release/ (`make release`). With none yet, the app starts and /api/score returns 503.
 
 # 1) compile the TypeScript frontend
-FROM node:24-slim AS web
+FROM node:26-slim AS web
 WORKDIR /web
 COPY frontend/package*.json frontend/.npmrc ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
