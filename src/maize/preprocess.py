@@ -14,7 +14,16 @@ def decode(data: bytes) -> np.ndarray | None:
     return None if bgr is None else cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
 
-def to_input(rgb: np.ndarray) -> np.ndarray:
-    """RGB uint8 HxWx3 -> float32 3x128x128 in [0,1]."""
-    img = cv2.resize(rgb, (IMG_SIZE, IMG_SIZE))
+def resize(rgb: np.ndarray) -> np.ndarray:
+    """RGB uint8 HxWx3 -> RGB uint8 128x128x3 (this is what the image cache stores)."""
+    return cv2.resize(rgb, (IMG_SIZE, IMG_SIZE))
+
+
+def to_tensor(img: np.ndarray) -> np.ndarray:
+    """Resized uint8 HxWx3 -> float32 3x128x128 in [0,1]."""
     return np.ascontiguousarray((img.astype(np.float32) / 255.0).transpose(2, 0, 1))
+
+
+def to_input(rgb: np.ndarray) -> np.ndarray:
+    """Full-size RGB photo -> model input."""
+    return to_tensor(resize(rgb))

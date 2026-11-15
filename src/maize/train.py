@@ -21,6 +21,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from .autoencoder import ConvAutoencoder, LeafDataset, export_onnx, pick_device, save_model
+from .cache import load_images
 from .data import HEALTHY, data_root, load_manifest, select
 
 
@@ -60,14 +61,17 @@ def main(argv=None):
     device = pick_device()
     root = data_root(a.data_root)
     df = load_manifest(root)
-    train_paths = select(df, root, label=HEALTHY, split="train")
-    val_paths = select(df, root, label=HEALTHY, split="val")
-    if not train_paths or not val_paths:
+    train_rows = select(df, label=HEALTHY, split="train")
+    val_rows = select(df, label=HEALTHY, split="val")
+    if train_rows.empty or val_rows.empty:
         raise SystemExit("No healthy train/val images in the manifest. Run `python -m maize.prepare --raw ...` first.")
-    print(f"Device: {device}   healthy train={len(train_paths)}  val={len(val_paths)}")
+    print(f"Device: {device}   healthy train={len(train_rows)}  val={len(val_rows)}")
 
-    train_loader = DataLoader(LeafDataset(train_paths), batch_size=a.batch_size, shuffle=True, num_workers=a.workers)
-    val_loader = DataLoader(LeafDataset(val_paths), batch_size=a.batch_size, shuffle=False, num_workers=a.workers)
+    # images come from the cache: the first run reads the photos once, later runs load instantly
+    train_loader = DataLoader(LeafDataset(load_images(train_rows, root)), batch_size=a.batch_size,
+                              shuffle=True, num_workers=a.workers)
+    val_loader = DataLoader(LeafDataset(load_images(val_rows, root)), batch_size=a.batch_size,
+                            shuffle=False, num_workers=a.workers)
 
     model = ConvAutoencoder().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=a.lr)
@@ -84,7 +88,7 @@ def main(argv=None):
             loss.backward()
             optimizer.step()
             train_loss += loss.item() * batch.size(0)
-        train_loss /= len(train_paths)
+        train_loss /= len(train_rows)
 
         model.eval()
         val_loss = 0.0
@@ -92,14 +96,14 @@ def main(argv=None):
             for batch in val_loader:
                 batch = batch.to(device)
                 val_loss += criterion(model(batch), batch).item() * batch.size(0)
-        val_loss /= len(val_paths)
+        val_loss /= len(val_rows)
 
         history.append({"epoch": epoch + 1, "train_loss": train_loss, "val_loss": val_loss})
         print(f"Epoch {epoch + 1:2d}/{a.epochs}  train_loss={train_loss:.5f}  val_loss={val_loss:.5f}")
 
     out = Path(a.out)
     meta = {"trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "data_version": data_version(df), "n_train": len(train_paths), "n_val": len(val_paths),
+            "data_version": data_version(df), "n_train": len(train_rows), "n_val": len(val_rows),
             "final_train_loss": history[-1]["train_loss"], "final_val_loss": history[-1]["val_loss"],
             "args": vars(a), "torch": torch.__version__, "git_commit": git_commit(), "device": device}
     save_model(model, out, meta)

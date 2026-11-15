@@ -4,13 +4,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import cv2
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from .preprocess import IMG_SIZE, to_input
+from .preprocess import IMG_SIZE, to_tensor
 
 WEIGHTS = "healthy_autoencoder.pt"
 
@@ -20,17 +19,16 @@ def pick_device() -> str:
 
 
 class LeafDataset(Dataset):
-    def __init__(self, paths):
-        self.paths = list(paths)
+    """images: (N,128,128,3) uint8 from cache.load_images."""
+
+    def __init__(self, images: np.ndarray):
+        self.images = images
 
     def __len__(self):
-        return len(self.paths)
+        return len(self.images)
 
     def __getitem__(self, idx):
-        img = cv2.imread(str(self.paths[idx]))
-        if img is None:
-            raise FileNotFoundError(f"Could not read {self.paths[idx]}")
-        return torch.from_numpy(to_input(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
+        return torch.from_numpy(to_tensor(self.images[idx]))
 
 
 class ConvAutoencoder(nn.Module):
@@ -54,10 +52,10 @@ class ConvAutoencoder(nn.Module):
 
 
 @torch.no_grad()
-def reconstruction_errors(model, paths, device: str, batch_size: int = 64) -> np.ndarray:
-    """Per-image mean squared reconstruction error, in the order of `paths`."""
+def reconstruction_errors(model, images: np.ndarray, device: str, batch_size: int = 64) -> np.ndarray:
+    """Per-image mean squared reconstruction error, in the order of `images`."""
     model.eval()
-    loader = DataLoader(LeafDataset(paths), batch_size=batch_size, shuffle=False)
+    loader = DataLoader(LeafDataset(images), batch_size=batch_size, shuffle=False)
     errors = []
     for batch in loader:
         batch = batch.to(device)

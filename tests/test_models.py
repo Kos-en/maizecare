@@ -2,18 +2,12 @@ import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
-cv2 = pytest.importorskip("cv2")
 
 from maize.autoencoder import ConvAutoencoder, LeafDataset, load_model, reconstruction_errors, save_model
 
 
-def write_images(tmp_path, n=5):
-    paths = []
-    for i in range(n):
-        p = tmp_path / f"{i}.png"
-        cv2.imwrite(str(p), np.random.default_rng(i).integers(0, 255, (200, 150, 3), dtype=np.uint8))
-        paths.append(str(p))
-    return paths
+def fake_images(n=5):
+    return np.random.default_rng(0).integers(0, 255, (n, 128, 128, 3), dtype=np.uint8)
 
 
 def test_autoencoder_shapes_and_range():
@@ -22,13 +16,13 @@ def test_autoencoder_shapes_and_range():
     assert y.shape == x.shape and 0.0 <= float(y.min()) and float(y.max()) <= 1.0
 
 
-def test_dataset_and_errors_align_with_paths(tmp_path):
-    paths = write_images(tmp_path)
-    assert LeafDataset(paths)[0].shape == (3, 128, 128)
-    errs = reconstruction_errors(ConvAutoencoder().eval(), paths, "cpu", batch_size=2)
+def test_dataset_and_errors_keep_order():
+    imgs = fake_images()
+    assert LeafDataset(imgs)[0].shape == (3, 128, 128)
+    errs = reconstruction_errors(ConvAutoencoder().eval(), imgs, "cpu", batch_size=2)
     assert errs.shape == (5,) and (errs >= 0).all()
     # same image twice -> same error (order is preserved, no shuffling)
-    twice = reconstruction_errors(ConvAutoencoder().eval(), [paths[0], paths[0]], "cpu")
+    twice = reconstruction_errors(ConvAutoencoder().eval(), imgs[[0, 0]], "cpu")
     assert twice[0] == pytest.approx(twice[1])
 
 
