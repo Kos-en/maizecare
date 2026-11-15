@@ -28,9 +28,13 @@ VAL_FRAC = 0.15
 _POP8 = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
 
 
+def popcount(x: np.ndarray) -> np.ndarray:
+    """Number of set bits in each uint64 (= Hamming distance when x is an XOR of two hashes)."""
+    return _POP8[x.view(np.uint8).reshape(*x.shape, 8)].sum(-1)
+
+
 def hamming_to_all(arr: np.ndarray, q: np.uint64) -> np.ndarray:
-    x = np.bitwise_xor(arr, q)
-    return _POP8[x.view(np.uint8).reshape(-1, 8)].sum(1)
+    return popcount(np.bitwise_xor(arr, q))
 
 
 class Index:
@@ -50,6 +54,7 @@ class Index:
         self.group = np.append(self.group, group)
         self.split = np.append(self.split, split)
         self.label = np.append(self.label, label)
+        self.next_group = max(self.next_group, group + 1)
 
 
 def bucket_split(phash_hex: str, val_frac: float) -> str:
@@ -96,6 +101,26 @@ def _rel(p: Path, root: Path) -> str:
         return str(p.resolve())
 
 
+def _inspect(p: Path) -> tuple[str, str, str, int, int] | None:
+    """(sha1, phash, ahash, width, height), or None if the file is not a readable image."""
+    try:
+        return (_sha1(p), *_hash_image(p))
+    except Exception:
+        return None
+
+
+def classify(label: str, info, known_sha: set, idx: Index, hamming: int, val_frac: float):
+    """-> (status, group, split) for one new file."""
+    if info is None:
+        return "bad_image", -1, ""
+    sha, ph, ah, w, h = info
+    if min(w, h) < MIN_SIDE:
+        return "too_small", -1, ""
+    if sha in known_sha:
+        return "duplicate_exact", -1, ""
+    return decide(label, int(ph, 16), int(ah, 16), idx, hamming, val_frac)
+
+
 def prepare(raw: Path, root: Path, val_frac: float = VAL_FRAC, hamming: int = HAMMING) -> pd.DataFrame:
     df = load_manifest(root)
     known_paths = set(df["path"])
@@ -104,36 +129,22 @@ def prepare(raw: Path, root: Path, val_frac: float = VAL_FRAC, hamming: int = HA
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     files = sorted(p for p in raw.rglob("*") if p.suffix.lower() in EXTS)
+    loose = {p for p in files if len(p.relative_to(raw).parts) < 2}
+    for p in sorted(loose):
+        print(f"[skip] {p}: put images in raw/<Class>/ (class = folder name)")
+    todo = [(p, rel) for p in files if p not in loose and (rel := _rel(p, root)) not in known_paths]
+
     new_rows = []
-    for p in files:
-        rel = _rel(p, root)
-        if rel in known_paths:
-            continue
-        parts = p.relative_to(raw).parts
-        if len(parts) < 2:
-            print(f"[skip] {p}: put images in raw/<Class>/ (class = folder name)")
-            continue
-        label = parts[0]
-        row = dict(path=rel, label=label, sha1="", phash="", ahash="", group=-1, split="", status="", added_at=now)
-        try:
-            row["sha1"] = _sha1(p)
-            row["phash"], row["ahash"], w, h = _hash_image(p)
-        except Exception:
-            row["status"] = "bad_image"
-            new_rows.append(row)
-            continue
-        if min(w, h) < MIN_SIDE:
-            row["status"] = "too_small"
-        elif row["sha1"] in known_sha:
-            row["status"] = "duplicate_exact"
-        else:
-            row["status"], row["group"], row["split"] = decide(
-                label, int(row["phash"], 16), int(row["ahash"], 16), idx, hamming, val_frac)
-            if row["status"] == "ok":
-                known_sha.add(row["sha1"])
-                idx.add(int(row["phash"], 16), int(row["ahash"], 16), row["group"], row["split"], label)
-                idx.next_group = max(idx.next_group, row["group"] + 1)
-        new_rows.append(row)
+    for p, rel in todo:
+        label = p.relative_to(raw).parts[0]
+        info = _inspect(p)
+        status, group, split = classify(label, info, known_sha, idx, hamming, val_frac)
+        sha, ph, ah = info[:3] if info else ("", "", "")
+        if status == "ok":  # later files in this same batch must see it as existing
+            known_sha.add(sha)
+            idx.add(int(ph, 16), int(ah, 16), group, split, label)
+        new_rows.append(dict(path=rel, label=label, sha1=sha, phash=ph, ahash=ah, group=group, split=split,
+                             status=status, added_at=now))
 
     if new_rows:
         df = pd.concat([df, pd.DataFrame(new_rows, columns=COLUMNS)], ignore_index=True)
@@ -152,9 +163,7 @@ def count_leaks(df: pd.DataFrame, hamming: int = HAMMING, chunk: int = 512) -> i
     split, bad = ok["split"].to_numpy(dtype=object), 0
     for s in range(0, len(ok), chunk):
         e = min(len(ok), s + chunk)
-        dp = _POP8[np.bitwise_xor(ph[s:e, None], ph[None, :]).view(np.uint8).reshape(e - s, len(ok), 8)].sum(-1)
-        da = _POP8[np.bitwise_xor(ah[s:e, None], ah[None, :]).view(np.uint8).reshape(e - s, len(ok), 8)].sum(-1)
-        near = np.minimum(dp, da) <= hamming
+        near = np.minimum(popcount(ph[s:e, None] ^ ph[None, :]), popcount(ah[s:e, None] ^ ah[None, :])) <= hamming
         ii, jj = np.nonzero(near)
         keep = (ii + s) < jj
         bad += int((split[ii[keep] + s] != split[jj[keep]]).sum())
