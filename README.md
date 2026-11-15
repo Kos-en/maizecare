@@ -50,11 +50,36 @@ Retraining is deliberately **manual** (`make train`): every model records the `d
 trained on in `meta.json`, so a result can always be traced to its exact dataset.
 
 ## Colab
+
+Training/eval need the GPU; everything else can run anywhere. Layout on Drive (keep images INSIDE the data root,
+because the manifest stores paths relative to it):
+
+```
+MyDrive/maize_data/
+  raw/Healthy|MLND|MSV|MLB/...     <- your images (move cv_datasets_cleaned here) + any new drops
+  manifest.csv                     <- written by prepare, persists across sessions
+MyDrive/maize_models/ae/           <- trained weights
+```
+
 ```python
-!git clone <repo-url> /content/repo && cd /content/repo && pip install -q -e .
-import os; os.environ["MAIZE_DATA_ROOT"] = "/content/drive/MyDrive/maize_data"
-!python -m maize.prepare --raw "/content/drive/MyDrive/cv_datasets_cleaned"
+from google.colab import drive; drive.mount("/content/drive")
+!git clone <repo-url> /content/repo
+%cd /content/repo
+# Colab already has torch/opencv: install only our package, without dependencies
+!pip install -q --no-deps -e . && pip install -q imagehash
+
+import os
+DRIVE = "/content/drive/MyDrive/maize_data"
+
+# 1) update the manifest on Drive (CPU, safe to re-run after adding images)
+os.environ["MAIZE_DATA_ROOT"] = DRIVE
+!python -m maize.prepare --raw {DRIVE}/raw
+
+# 2) copy images to fast local disk for training (Drive reads are slow); manifest paths still resolve
+!mkdir -p /content/data && cp -r {DRIVE}/raw {DRIVE}/manifest.csv /content/data/
+os.environ["MAIZE_DATA_ROOT"] = "/content/data"
 !python -m maize.train --out /content/drive/MyDrive/maize_models/ae
+!python -m maize.evaluate --model-dir /content/drive/MyDrive/maize_models/ae
 ```
 
 ## Differences from the notebook (on purpose)
