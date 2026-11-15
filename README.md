@@ -1,71 +1,68 @@
-# Maize leaf disease + severity (two-stage)
+# Maize leaf severity: healthy-only autoencoder
 
-Stage 1: classify Healthy / MLND / MSV / Blight with pretrained CNNs (ResNet50 reference vs
-MobileNetV2, MobileNetV3-Small, EfficientNetB0). Stage 2: an autoencoder trained on healthy
-leaves; its masked reconstruction error becomes a label-free severity score.
-Training runs on Colab/conda with Python **scripts**; serving is a **TFLite** FastAPI app on **Render**.
+A convolutional autoencoder trained on **Healthy** leaves only. Its reconstruction error on a
+diseased leaf (MLND / MSV / MLB) is the severity signal: no severity labels needed.
+This repo is the notebook `maize_severity_autoencoder` turned into scripts, plus an incremental
+data-cleaning step so new images can be added safely.
 
-## Setup (conda)
-
-```bash
-conda activate "ml graduate"          # your env
-pip install -r requirements/train.txt # skip tensorflow if the env already has it (>=2.16, Keras 3)
-pytest                                # TF-free tests run anywhere; TF tests skip if TF is missing
+```
+src/maize/
+  prepare.py      clean + dedup + split NEW images -> data/manifest.csv   (torch-free)
+  data.py         manifest helpers
+  autoencoder.py  model, dataset, reconstruction_errors, save/load        (torch)
+  train.py        train on healthy train split, writes models/ae/
+  evaluate.py     false-positive check, error by class, formula correlation, heat maps
+  severity.py     the notebook's OpenCV formula severity (comparison signal only)
+tests/            pytest (data-pipeline tests need no torch)
+Makefile          make data | verify | train | eval | test
 ```
 
-Set where data and runs live (defaults `./data`, `./runs`):
-`export MAIZE_DATA_ROOT=...  MAIZE_RUNS_ROOT=...` (on Colab: data on `/content`, runs on Drive).
-
-## Pipeline (run in order)
-
-| # | Script | What it does | Where |
-|---|--------|--------------|-------|
-| 1 | `01_build_manifest.py` | scan folders, quality filter, blur/brightness, aHash+pHash → `manifest.csv` | CPU |
-| 2 | `02_eda.py [--tsne]` | balance, size/light/blur by class+source, near-duplicates, t-SNE | CPU |
-| 3 | `03_split.py [--inspect]` | tune Hamming cut-off by eye, groups, test set + StratifiedGroupKFold(5), leak check | CPU |
-| 4 | `04_preprocess.py`, `04b_mask_check.py` | leaf mask + 224px cache; IoU vs ~100 hand masks (+ blurred/dark copies) | CPU |
-| 5 | `05_train_classifier.py` | 2-phase training, one backbone, folds resumable | GPU |
-| 6 | `06_train_ae.py` | CAE/VAE (MSE or MSE+SSIM) on healthy training folds | GPU |
-| 7 | `07_calibrate.py` | severity scaling (Eq 3.2), tertile grades, retake threshold | GPU/CPU |
-| 8 | `08_evaluate.py clf\|sev` | test-set metrics, robustness, Spearman vs symptomatic area | GPU/CPU |
-| 9 | `09_export.py` | TFLite int8/fp16 + release folder + before/after report | GPU/CPU |
-
-Every script is resumable and takes `--set key=value` overrides, e.g.
-`python scripts/05_train_classifier.py --config configs/classifier/mobilenetv2.yaml --fold all --set masked=false`.
-
-Model selection: compare backbones by mean±sd macro-F1 over the 5 folds (masked vs raw), evaluate
-the fold models once on the test set (`08`), export the chosen fold's model (`09`).
-
-## Things that must not be skipped
-
-- **Freeze the symptom colour ranges** in `src/maize/symptom_area.py` *before* looking at any
-  autoencoder score, then rename `SYMPTOM_VERSION` to `1.0.0` and commit (the proposal promises this).
-- **One masking module** (`maize/masking.py` + `maize/preprocess.py`) is used by training and serving.
-  Change it → bump `MASK_VERSION` → rerun `04_preprocess.py --force` and retrain. The API refuses to
-  start if the model's mask version differs from the code's.
-- **Check source confounding in EDA**: if one collection holds all the Healthy images, the classifier can
-  learn the source. `02_eda.py` prints stats by source + class.
-- **Advice text** in `serving/advice.py` is placeholder wording; agree it with an extension officer.
-- Set `blur_min` etc. in `pipeline_config.json` from the EDA percentiles of sharp photos.
-
-## Serving on Render (free, no card)
+## Workflow
 
 ```bash
-python scripts/09_export.py --clf-run runs/clf/<model>/fold0 --ae-run runs/ae/<ae>/fold0 --out artifacts/release-lite
-git add artifacts/release-lite && git commit -m "release models" && git push
-```
-Render → New → Blueprint → select the repo (`render.yaml`). The free instance has ~512 MB RAM, sleeps after
-15 min idle (first request ≈ 1 min), and 0.1 CPU, so expect 1-3 s per photo.
-The image has no TensorFlow: classifier heat map = **CAM** (`features @ head weights`), exact for the
-GAP→Dense head; `evaluate/gradcam.py` checks CAM vs real Grad-CAM in the training env.
+pip install -e ".[dev]"            # add ",train" if torch isn't installed (Colab has it)
 
-Local check of the image:
-```bash
-docker build -f docker/Dockerfile.lite -t maize-lite .
-docker run --rm -p 8000:8000 -e PORT=8000 maize-lite     # http://localhost:8000
+# 1) FIRST RUN: point at your existing cleaned folder (Healthy/ MLND/ MSV/ MLB/ subfolders)
+python -m maize.prepare --raw "/path/to/cv_datasets_cleaned"
+
+# 2) later: drop new images into <raw>/<Class>/ and re-run the same command. That is the whole
+#    "data cleans itself" step: safe to run any time, any number of times.
+python -m maize.prepare --raw "/path/to/raw"
+
+python -m maize.train              # same settings as the notebook (20 epochs, lr 1e-3, batch 64)
+python -m maize.evaluate           # results + figures in models/ae/eval/
 ```
-Frontend dev: `cd frontend && npm install && npm run dev` (proxies to uvicorn on :8000).
+
+Set `MAIZE_DATA_ROOT` (or `--data-root`) to where `manifest.csv` should live; it can be a Drive folder.
+
+### What `prepare` guarantees
+- **Idempotent**: files already in the manifest are skipped.
+- **Splits never drift**: an existing image keeps its group and train/val split forever.
+- **Near-duplicates can't leak**: a new image within 6 bits (min of pHash/aHash, as in the notebook)
+  of an existing one inherits its split. If it bridges train *and* val it is quarantined.
+- **Bad data is recorded, not silently dropped** (`status` column): `bad_image`, `too_small`,
+  `duplicate_exact`, `label_conflict` (same picture under another class), `split_conflict`.
+- New groups get a deterministic split from their hash (`val_frac`, default 15%), so the result does not
+  depend on arrival order.
+- `python -m maize.prepare --verify` re-checks the whole manifest for leakage (exit code 1 if any).
+
+Retraining is deliberately **manual** (`make train`): every model records the `data_version` it was
+trained on in `meta.json`, so a result can always be traced to its exact dataset.
 
 ## Colab
+```python
+!git clone <repo-url> /content/repo && cd /content/repo && pip install -q -e .
+import os; os.environ["MAIZE_DATA_ROOT"] = "/content/drive/MyDrive/maize_data"
+!python -m maize.prepare --raw "/content/drive/MyDrive/cv_datasets_cleaned"
+!python -m maize.train --out /content/drive/MyDrive/maize_models/ae
+```
 
-`colab/launcher.ipynb` only mounts Drive, clones the repo, sets `MAIZE_*` env vars and calls the scripts.
+## Differences from the notebook (on purpose)
+- Per-image formula-correlation loop now computes all reconstruction errors in one batch (same numbers, much faster).
+- Correlation is run for every disease class, not just MLND.
+- Figures are saved to disk instead of `plt.show()`.
+- Group assignment is incremental (see above) instead of one-off complete-linkage clustering.
+
+## Not built yet (see git branch `main` for an earlier, larger TF/Keras scaffold)
+Stage-1 classifier, leaf masking, test split, web service / Docker / Render. They depend on whether the
+classifier is done in PyTorch (as the notebook) or Keras (as the proposal says).

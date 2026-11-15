@@ -1,5 +1,0 @@
-_base: base.yaml
-name: cae_ssim
-kind: cae
-latent_channels: 16
-ssim_weight: 0.5

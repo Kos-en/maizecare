@@ -1,9 +1,0 @@
-seed: 42
-masked: true            # compare masked vs raw: run again with --set masked=false
-batch_size: 32
-dropout: 0.3
-balance: class_weight   # class_weight | oversample | none
-unfreeze_last: 40
-phase1: {lr: 1.0e-3, epochs: 15, patience: 4}    # head only
-phase2: {lr: 1.0e-5, epochs: 30, patience: 6}    # fine-tune upper blocks
-augment: {rotation: 0.1, zoom: 0.15, dark_min: 0.55, blur_p: 0.2, jpeg_p: 0.3}
