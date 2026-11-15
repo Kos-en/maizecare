@@ -1,10 +1,8 @@
-// Talks to POST /api/score (src/maize/serve.py). Plain TypeScript, no framework.
+// Uploads a photo to POST /api/score (src/maize/serve.py) and shows the result.
 interface ScoreResult {
-  error: number;
   score: number; // 0 = healthy-like, 1 = as far from healthy as the worst diseased leaves
   within_healthy_range: boolean;
   heatmap_png: string; // base64
-  model_version?: string | null;
 }
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -15,7 +13,7 @@ const message = $<HTMLDivElement>("message");
 const result = $<HTMLElement>("result");
 
 function showMessage(text: string): void {
-  message.textContent = text; // textContent: never inject server text as HTML
+  message.textContent = text; // textContent, so server text is never parsed as HTML
   message.className = "card warn";
   message.hidden = false;
 }
@@ -23,11 +21,11 @@ function showMessage(text: string): void {
 function render(r: ScoreResult): void {
   const pct = Math.round(r.score * 100);
   $("headline").textContent = r.within_healthy_range ? "Looks healthy" : `Severity ${pct}%`;
-  ($("fill") as HTMLElement).style.width = `${pct}%`;
+  $("fill").style.width = `${pct}%`;
   $("detail").textContent = r.within_healthy_range
     ? "This leaf is within the range of healthy leaves."
     : `Score ${r.score.toFixed(2)} (0 = healthy-like, 1 = very far from healthy).`;
-  ($("heatmap") as HTMLImageElement).src = `data:image/png;base64,${r.heatmap_png}`;
+  $<HTMLImageElement>("heatmap").src = `data:image/png;base64,${r.heatmap_png}`;
   result.hidden = false;
 }
 

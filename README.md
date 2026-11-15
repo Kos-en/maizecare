@@ -1,25 +1,21 @@
 # Maize leaf severity: healthy-only autoencoder
 
-A convolutional autoencoder trained on **Healthy** leaves only. Its reconstruction error on a
-diseased leaf (MLND / MSV / MLB) is the severity signal: no severity labels needed.
-This repo is the notebook `maize_severity_autoencoder` turned into scripts, plus an incremental
+A convolutional autoencoder trained on Healthy leaves only. Its reconstruction error on a
+diseased leaf (MLND / MSV / MLB) is the severity signal, so no severity labels are needed.
+The repo is the notebook `maize_severity_autoencoder` as scripts, plus an incremental
 data-cleaning step so new images can be added safely.
 
 ```
 src/maize/
-  prepare.py      clean + dedup + split NEW images -> data/manifest.csv   (torch-free)
+  prepare.py      clean, dedup and split new images -> data/manifest.csv   (no torch)
   data.py         manifest helpers
-  autoencoder.py  model, dataset, reconstruction_errors, save/load        (torch)
-  train.py        train on healthy train split, writes models/ae/
+  autoencoder.py  model, dataset, reconstruction_errors, save/load/ONNX export
+  train.py        train on the healthy train split, writes models/ae/
   evaluate.py     false-positive check, error by class, formula correlation, heat maps
-  severity.py     the notebook's OpenCV formula severity (comparison signal only)
-  preprocess.py   photo -> model input; shared by training AND the web app
-  serve.py        FastAPI app: /api/score + serves the built frontend       (no torch)
-frontend/         ~100 lines of TypeScript (no framework) -> compiled to static files
-Dockerfile        builds the frontend, installs the slim server, ships release/
-render.yaml       Render blueprint (free plan)
-tests/            pytest (data-pipeline + web tests need no torch)
-Makefile          make data | verify | train | eval | release | serve | docker | test
+  severity.py     the notebook's OpenCV formula severity (comparison only)
+  preprocess.py   photo -> model input, shared by training and the web app
+  serve.py        FastAPI app: /api/score + the built frontend              (no torch)
+frontend/         plain TypeScript UI, compiled to static files
 ```
 
 ## Workflow
@@ -27,55 +23,46 @@ Makefile          make data | verify | train | eval | release | serve | docker |
 ```bash
 pip install -e ".[dev]"            # add ",train" if torch isn't installed (Colab has it)
 
-# 1) FIRST RUN: point at your existing cleaned folder (Healthy/ MLND/ MSV/ MLB/ subfolders)
+# first run: point at your cleaned folder (Healthy/ MLND/ MSV/ MLB/ subfolders)
 python -m maize.prepare --raw "/path/to/cv_datasets_cleaned"
+# later: drop new images into <raw>/<Class>/ and run the same command again
 
-# 2) later: drop new images into <raw>/<Class>/ and re-run the same command. That is the whole
-#    "data cleans itself" step: safe to run any time, any number of times.
-python -m maize.prepare --raw "/path/to/raw"
-
-python -m maize.train              # same settings as the notebook (20 epochs, lr 1e-3, batch 64)
-python -m maize.evaluate           # results + figures in models/ae/eval/
+python -m maize.train              # notebook settings: 20 epochs, lr 1e-3, batch 64
+python -m maize.evaluate           # results, figures and calibration.json in models/ae/eval/
 ```
 
 Set `MAIZE_DATA_ROOT` (or `--data-root`) to where `manifest.csv` should live; it can be a Drive folder.
+Retraining is manual. Each model records the `data_version` it was trained on in `meta.json`.
 
 ### What `prepare` guarantees
-- **Idempotent**: files already in the manifest are skipped.
-- **Splits never drift**: an existing image keeps its group and train/val split forever.
-- **Near-duplicates can't leak**: a new image within 6 bits (min of pHash/aHash, as in the notebook)
-  of an existing one inherits its split. If it bridges train *and* val it is quarantined.
-- **Bad data is recorded, not silently dropped** (`status` column): `bad_image`, `too_small`,
-  `duplicate_exact`, `label_conflict` (same picture under another class), `split_conflict`.
-- New groups get a deterministic split from their hash (`val_frac`, default 15%), so the result does not
-  depend on arrival order.
+- Idempotent: files already in the manifest are skipped.
+- Splits never drift: an existing image keeps its group and train/val split.
+- Near-duplicates cannot leak: a new image within 6 bits (min of pHash/aHash, as in the notebook) of an
+  existing one inherits its split. If it is near both a train and a val image it is quarantined.
+- Bad data is recorded in the `status` column, not dropped: `bad_image`, `too_small`, `duplicate_exact`,
+  `label_conflict` (same picture under another class), `split_conflict`.
+- New groups get a split from their hash (`val_frac`, default 15%), so arrival order does not matter.
 - `python -m maize.prepare --verify` re-checks the whole manifest for leakage (exit code 1 if any).
 
-Retraining is deliberately **manual** (`make train`): every model records the `data_version` it was
-trained on in `meta.json`, so a result can always be traced to its exact dataset.
-
-## Web app (production path)
+## Web app
 
 ```
 make train eval    # train writes model.onnx, eval writes calibration.json
-make release       # copies model.onnx + calibration.json + meta.json into release/  (commit these, they are small)
-make serve         # local: builds the TypeScript, starts the app at http://localhost:8000
-make docker        # same thing in the production container
+make release       # copies model.onnx, calibration.json, meta.json into release/ (small; commit them)
+make serve         # builds the frontend, serves http://localhost:8000
+make docker        # the same in the production container
 ```
-`serve.py` starts, loads `release/`, and serves the compiled frontend from the same process, so there is
-one container and one URL. The model is exported to ONNX at train time and served with `onnxruntime`
-(no torch in production: small image, fits Render's free 512 MB). The app returns a reconstruction error,
-a 0-1 severity score (`(e - median healthy) / (p99 diseased - median healthy)`) and an error heat map.
-It does **not** name the disease yet: that needs the stage-1 classifier.
+The model is exported to ONNX at train time and served with `onnxruntime`, so the image has no torch
+and fits Render's free 512 MB. The app returns the reconstruction error, a 0-1 severity score
+`(e - median healthy) / (p99 diseased - median healthy)` and an error heat map. It does not name the
+disease; that needs the stage-1 classifier.
 
-**Deploy on Render (free, no card):** push the repo to GitHub, Render -> New -> Blueprint -> select the repo.
-Free instances sleep after 15 min idle (first request ~1 min) and have ~0.1 CPU. Photos are processed in
-memory and never stored.
+Deploy on Render (free): push to GitHub, then Render -> New -> Blueprint -> select the repo.
+Free instances sleep after 15 min idle (first request takes about a minute). Photos are never stored.
 
 ## Colab
 
-Training/eval need the GPU; everything else can run anywhere. Layout on Drive (keep images INSIDE the data root,
-because the manifest stores paths relative to it):
+Training and eval want the GPU. Keep images inside the data root, because the manifest stores relative paths:
 
 ```
 MyDrive/maize_data/
@@ -88,7 +75,7 @@ MyDrive/maize_models/ae/           <- trained weights
 from google.colab import drive; drive.mount("/content/drive")
 !git clone <repo-url> /content/repo
 %cd /content/repo
-# Colab already has torch/opencv: install only our package, without dependencies
+# Colab already has torch/opencv: install only our package
 !pip install -q --no-deps -e . && pip install -q imagehash
 
 import os

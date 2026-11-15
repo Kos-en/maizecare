@@ -1,21 +1,13 @@
-"""Incremental data cleaning: drop new images into a raw folder, run this, done.
+"""Clean new images and add them to data/manifest.csv. Safe to re-run.
 
-    raw/<Class>/*.jpg   ->   data/manifest.csv   (which images are usable, group, train/val)
+    python -m maize.prepare --raw /path/to/raw     # raw/<Class>/*.jpg, class = folder name
+    python -m maize.prepare --verify               # check the manifest for train/val leakage
 
-Idempotent and append-only:
-  * files already in the manifest are skipped, so re-running does nothing;
-  * existing images NEVER change group or split when new data arrives (no leakage drift);
-  * a new image that is a near-copy of an existing one inherits that image's split;
-  * unusable images are recorded with a reason instead of silently dropped.
-
-Near-copy rule = your notebook's: min(pHash, aHash Hamming distance) <= 6 bits.
-(Notebook used complete-linkage clustering over all images at once; here a new image joins
-an existing group if it is within the threshold of ANY member: slightly stricter grouping,
-which is the safe direction for leakage.)
-
-    python -m maize.prepare --raw /path/to/cv_datasets_cleaned      # first run: your current folder
-    python -m maize.prepare --raw data/raw                          # later: new drops
-    python -m maize.prepare --verify                                # leakage check on the manifest
+Files already in the manifest are skipped, and an existing image never changes group or split.
+Unusable images are kept in the manifest with a status instead of being dropped.
+Near-copy rule (from the notebook): min(pHash, aHash Hamming distance) <= 6. A new image joins
+an existing group if it is near ANY member (the notebook used complete linkage); this is
+stricter, which is the safe direction for leakage.
 """
 from __future__ import annotations
 
@@ -42,7 +34,7 @@ def hamming_to_all(arr: np.ndarray, q: np.uint64) -> np.ndarray:
 
 
 class Index:
-    """Hashes of every accepted image, kept in memory while processing a batch."""
+    """Hashes, group, split and label of every accepted image, held in memory during a run."""
 
     def __init__(self, ok: pd.DataFrame):
         self.ph = np.array([int(h, 16) for h in ok["phash"]], dtype=np.uint64)
@@ -61,7 +53,7 @@ class Index:
 
 
 def bucket_split(phash_hex: str, val_frac: float) -> str:
-    """Deterministic: the same group always lands in the same split, whatever order data arrives."""
+    """Split from the hash alone, so it does not depend on the order images arrive."""
     return "val" if (int(phash_hex, 16) % 10_000) / 10_000 < val_frac else "train"
 
 
@@ -72,7 +64,7 @@ def decide(label: str, ph: int, ah: int, idx: Index, hamming: int, val_frac: flo
         near = d <= hamming
         if near.any():
             if len(set(idx.split[near])) > 1:
-                return "split_conflict", -1, ""     # bridges train and val: using it would leak
+                return "split_conflict", -1, ""     # near copies of both train and val: would leak
             if label not in set(idx.label[near]):
                 return "label_conflict", -1, ""     # same picture filed under another class
             best = np.flatnonzero(near)[np.argmin(d[near])]

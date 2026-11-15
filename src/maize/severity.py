@@ -1,5 +1,5 @@
-"""Formula-based severity from OpenCV colour features. Copied from the notebook as-is:
-used ONLY as an independent signal to check the autoencoder score against (not ground truth)."""
+"""Formula severity from OpenCV colour features (from the notebook). Only used to cross-check the
+autoencoder score, not as ground truth."""
 from __future__ import annotations
 
 import cv2

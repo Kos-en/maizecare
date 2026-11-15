@@ -1,5 +1,4 @@
-# Slim serving image (no torch/pandas): ONNX Runtime + OpenCV + FastAPI.
-# Upper bounds guard against surprise major bumps; pin exact versions after the first good build.
+# Slim serving image (no torch/pandas). Upper bounds only; pin exact versions once a build works.
 numpy<3
 opencv-python-headless<5
 onnxruntime<2
