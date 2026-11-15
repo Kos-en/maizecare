@@ -1,5 +1,4 @@
-"""Convolutional autoencoder + helpers. Architecture, preprocessing and loss are exactly
-the notebook's (128x128, 4 stride-2 convs to an 8x8x32 bottleneck, MSE)."""
+"""Convolutional autoencoder (128x128 input, 8x8x32 bottleneck) plus dataset, save/load and ONNX export."""
 from __future__ import annotations
 
 import json
@@ -79,12 +78,12 @@ def load_model(model_dir: Path, device: str) -> ConvAutoencoder:
 
 
 def export_onnx(model, path: Path) -> None:
-    """ONNX file for the web service (served with onnxruntime: no torch in production)."""
+    """The web service runs this file with onnxruntime, so production needs no torch."""
     model = model.eval().cpu()
     dummy = torch.zeros(1, 3, IMG_SIZE, IMG_SIZE)
     kw = dict(input_names=["image"], output_names=["recon"], opset_version=17,
               dynamic_axes={"image": {0: "batch"}, "recon": {0: "batch"}})
     try:
-        torch.onnx.export(model, dummy, str(path), dynamo=False, **kw)  # torch >= 2.5
+        torch.onnx.export(model, dummy, str(path), dynamo=False, **kw)  # torch >= 2.5 needs dynamo=False
     except TypeError:
         torch.onnx.export(model, dummy, str(path), **kw)

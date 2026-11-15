@@ -1,6 +1,5 @@
-"""The ONE place that turns a photo into model input. Used by training (LeafDataset) and by the
-web service, so a photo sent to the app is processed exactly like the training images.
-No torch / pandas imports: the slim serving image only has numpy + OpenCV."""
+"""Photo -> model input. Shared by training and the web app so both see identical pixels.
+Only numpy + OpenCV, because the serving image has no torch."""
 from __future__ import annotations
 
 import cv2
@@ -16,6 +15,6 @@ def decode(data: bytes) -> np.ndarray | None:
 
 
 def to_input(rgb: np.ndarray) -> np.ndarray:
-    """RGB uint8 HxWx3 -> float32 3x128x128 in [0,1] (the notebook's preprocessing)."""
+    """RGB uint8 HxWx3 -> float32 3x128x128 in [0,1]."""
     img = cv2.resize(rgb, (IMG_SIZE, IMG_SIZE))
     return np.ascontiguousarray((img.astype(np.float32) / 255.0).transpose(2, 0, 1))

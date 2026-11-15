@@ -1,9 +1,9 @@
-"""Train the autoencoder on HEALTHY leaves only (train split from the manifest).
+"""Train the autoencoder on healthy leaves only (train split of the manifest).
 
-    python -m maize.train                       # defaults = notebook settings
     python -m maize.train --epochs 5 --out models/test
-Writes models/ae/{healthy_autoencoder.pt, model.onnx, history.csv, meta.json}. meta.json records which
-data the model was trained on (data_version) so any model can be traced to its dataset.
+
+Writes healthy_autoencoder.pt, model.onnx, history.csv and meta.json to the output folder.
+meta.json holds data_version, a hash of the images used, to trace a model to its data.
 """
 from __future__ import annotations
 

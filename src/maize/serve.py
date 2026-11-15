@@ -1,14 +1,10 @@
-"""Web service: FastAPI + the built TypeScript frontend, served from one process.
+"""FastAPI app: scores a leaf photo with the ONNX model and serves the built frontend.
 
-    uvicorn maize.serve:app --port 8000        # model in ./model, frontend in ./static
+    uvicorn maize.serve:app --port 8000
 
-  GET  /health       liveness + whether the model is loaded (Render health check)
-  POST /api/score    multipart image -> reconstruction error, 0-1 severity score, heat map
-  GET  /             the frontend (static/), mounted last so it never shadows the API
-
-Torch-free: runs the exported ONNX model with onnxruntime. Photos are processed in memory and
-never stored. Without a model the app still starts (so a first deploy works); /api/score
-then answers 503.
+GET /health, POST /api/score (image -> error, 0-1 score, heat map), and / for the frontend.
+Photos are processed in memory, never stored. With no model files the app still starts
+and /api/score returns 503, so a first deploy works.
 """
 from __future__ import annotations
 
@@ -16,14 +12,13 @@ import base64
 import json
 import logging
 import os
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
@@ -57,7 +52,7 @@ class Scorer:
         heat = err_map / max(float(err_map.max()), 1e-8)
         color = cv2.applyColorMap((cv2.resize(heat, (DISPLAY, DISPLAY)) * 255).astype(np.uint8), cv2.COLORMAP_JET)
         base = cv2.cvtColor(cv2.resize(rgb, (DISPLAY, DISPLAY)), cv2.COLOR_RGB2BGR)
-        ok, png = cv2.imencode(".png", cv2.addWeighted(base, 0.55, color, 0.45, 0))
+        png = cv2.imencode(".png", cv2.addWeighted(base, 0.55, color, 0.45, 0))[1]
         return {
             "error": e,
             "score": float(min(1.0, max(0.0, (e - med) / (p99 - med)))),
@@ -82,14 +77,6 @@ def create_app(scorer: Scorer | None = None, static_dir: str | None = None) -> F
         yield
 
     app = FastAPI(title="Maize leaf severity", lifespan=lifespan)
-
-    @app.middleware("http")
-    async def timing(request: Request, call_next):
-        t0 = time.perf_counter()
-        resp = await call_next(request)
-        log.info("%s %s -> %s in %.0f ms", request.method, request.url.path, resp.status_code,
-                 (time.perf_counter() - t0) * 1000)
-        return resp
 
     @app.get("/health")
     def health():

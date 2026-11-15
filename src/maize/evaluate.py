@@ -1,5 +1,5 @@
-"""Notebook sections 5-8 as one script: false-positive check, error by class, correlation
-with the formula severity, reconstruction heat maps. Everything lands in <model-dir>/eval/.
+"""Evaluate a trained model: false-positive check on healthy, error by class, correlation with
+the formula severity, heat maps. Output goes to <model-dir>/eval/; also writes calibration.json.
 
     python -m maize.evaluate --model-dir models/ae
 """
@@ -10,7 +10,6 @@ import json
 import random
 from pathlib import Path
 
-import cv2
 import matplotlib
 
 matplotlib.use("Agg")
@@ -21,15 +20,14 @@ from scipy.stats import spearmanr
 from tqdm import tqdm
 
 from .autoencoder import load_model, pick_device, reconstruction_errors
-from .data import HEALTHY, IMG_SIZE, data_root, load_manifest, select
+from .data import HEALTHY, data_root, load_manifest, select
+from .preprocess import decode, to_input
 from .severity import extract_quick_features, formula_severity
 
 
 @torch.no_grad()
 def save_reconstruction_figure(model, image_path, title, out_file, device):
-    img = cv2.cvtColor(cv2.imread(str(image_path)), cv2.COLOR_BGR2RGB)
-    img = cv2.resize(img, (IMG_SIZE, IMG_SIZE)).astype(np.float32) / 255.0
-    x = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0).to(device)
+    x = torch.from_numpy(to_input(decode(Path(image_path).read_bytes())))[None].to(device)
     recon = model(x).cpu().numpy()[0].transpose(1, 2, 0)
     original = x.cpu().numpy()[0].transpose(1, 2, 0)
     error_map = np.mean((original - recon) ** 2, axis=2)
@@ -100,21 +98,23 @@ def main(argv=None):
     plt.savefig(out / "error_by_class.png", dpi=120)
     plt.close()
 
-    # calibration for the web service: score = clip((e - median_healthy) / (p99_diseased - median_healthy), 0, 1)
+    # calibration for the web service: score = clip((e - healthy median) / (diseased p99 - healthy median), 0, 1)
+    cal_file = Path(a.model_dir) / "calibration.json"
+    cal_file.unlink(missing_ok=True)  # never leave a stale calibration from an earlier model
     disease_err = [e for c, e in class_errors.items() if c != HEALTHY]
     if disease_err:
         e_d99 = float(np.percentile(np.concatenate(disease_err), 99))
         e_med = float(np.median(val_err))
         if e_d99 > e_med:
             meta = json.loads((Path(a.model_dir) / "meta.json").read_text())
-            (Path(a.model_dir) / "calibration.json").write_text(json.dumps({
+            cal_file.write_text(json.dumps({
                 "e_healthy_median": e_med, "e_healthy_p95": threshold, "e_disease_p99": e_d99,
                 "data_version": meta.get("data_version")}, indent=2))
             print("Wrote calibration.json")
         else:
             print("WARNING: diseased errors are not above healthy: no calibration.json written.")
 
-    # 7. correlation with formula severity (corroboration, not ground truth)
+    # 7. correlation with formula severity
     results["formula_correlation"] = {}
     for d in diseases:
         paths, scores = [], []

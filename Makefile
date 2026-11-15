@@ -1,4 +1,4 @@
-# One command per stage. Set RAW to the folder with <Class>/ subfolders of images.
+# RAW is the folder with <Class>/ subfolders of images.
 RAW ?= data/raw
 DATA ?= data
 MODEL ?= models/ae
@@ -6,9 +6,9 @@ MODEL ?= models/ae
 .PHONY: install data verify train eval release frontend serve docker test all
 
 install:
-	pip install -e ".[dev]"          # add ,train if torch is not already installed
+	pip install -e ".[dev]"          # add ,train if torch is not installed
 
-data:                                # clean + dedup + split NEW images (safe to re-run any time)
+data:                                # clean, dedup and split new images (safe to re-run)
 	python -m maize.prepare --raw $(RAW) --data-root $(DATA)
 
 verify:                              # fail if any near-copy crosses train/val
@@ -25,7 +25,7 @@ release:                             # the 3 small files the web app ships with 
 	cp $(MODEL)/model.onnx $(MODEL)/calibration.json $(MODEL)/meta.json release/
 
 frontend:                            # compile TypeScript -> frontend/dist
-	cd frontend && npm install && npm run build
+	cd frontend && npm ci && npm run build
 
 serve: frontend                      # run the app locally on :8000 (needs `pip install -e ".[serve]"`)
 	MAIZE_MODEL_DIR=release MAIZE_STATIC_DIR=frontend/dist uvicorn maize.serve:app --port 8000
