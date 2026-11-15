@@ -196,6 +196,8 @@ def main(argv=None):
         raise SystemExit(1 if n else 0)
     if not a.raw:
         ap.error("--raw is required (or use --verify)")
+    if not Path(a.raw).is_dir():
+        ap.error(f"--raw folder not found: {a.raw}")
     df = prepare(Path(a.raw), root, a.val_frac, a.hamming)
     report(df)
     n = count_leaks(df, a.hamming)
