@@ -76,13 +76,13 @@ the `serve` extra from the lock, so production runs exactly what CI tested.
 
 `.github/workflows/ci.yml` on every push and PR: ruff, pytest, `pip-audit` on the shipped dependencies,
 `npm audit` and the frontend build. On a push to `main` it then builds the image, pushes it to GitHub's
-registry (`ghcr.io/<user>/<repo>`, tagged `latest` and the commit SHA) and tells Render to deploy that
+registry (`ghcr.io/kos-en/maizecare`, tagged `latest` and the commit SHA) and tells Render to deploy that
 exact image. Dependabot opens weekly update PRs.
 
 One-time setup on Render (free plan):
 1. Push to `main` once so the image exists in GHCR, then make the package public
    (GitHub -> Packages -> maize -> Package settings), or add GHCR credentials in Render.
-2. Render -> New -> Web Service -> Existing image -> `ghcr.io/<user>/<repo>:latest`, plan Free,
+2. Render -> New -> Web Service -> Existing image -> `ghcr.io/kos-en/maizecare:latest`, plan Free,
    health check path `/health` (or put the URL in `render.yaml` and use New -> Blueprint).
 3. Copy the service's Deploy Hook URL (Settings) into the GitHub repo secret `RENDER_DEPLOY_HOOK_URL`.
 Free instances sleep after 15 min idle (first request takes about a minute). Photos are never stored.
@@ -108,10 +108,10 @@ MyDrive/maize_models/ae/, clf/     <- trained models
 
 ```python
 from google.colab import drive; drive.mount("/content/drive")
-!git clone <repo-url> /content/repo
+!git clone https://github.com/Kos-en/maizecare /content/repo
 %cd /content/repo
 # Colab already has torch, keras, sklearn and opencv: install only our package
-!pip install -q --no-deps -e . && pip install -q imagehash onnx
+!pip install -q --no-deps -e . && pip install -q imagehash onnx onnxscript
 
 import os
 DRIVE = "/content/drive/MyDrive/maize_data"

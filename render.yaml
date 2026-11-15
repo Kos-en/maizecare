@@ -1,10 +1,10 @@
 # Render Blueprint: the image is built and pushed by GitHub Actions (.github/workflows/ci.yml);
-# Render only runs it. Set image.url to ghcr.io/<github-user>/<repo> (lowercase) before applying.
+# Render only runs it.
 services:
   - type: web
     name: maize-severity
     runtime: image
     image:
-      url: ghcr.io/OWNER/REPO:latest
+      url: ghcr.io/kos-en/maizecare:latest
     plan: free
     healthCheckPath: /health
