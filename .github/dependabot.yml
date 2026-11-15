@@ -1,17 +1,26 @@
-# Weekly update PRs; cooldown skips releases younger than 7 days (most supply-chain attacks are caught by then).
+# Weekly minor/patch update PRs into develop. Major versions (Node, Python, OpenCV, TypeScript...) are
+# upgraded by hand. Cooldown skips releases younger than 7 days (most supply-chain attacks are caught by then).
 version: 2
 updates:
   - package-ecosystem: uv
     directory: /
+    target-branch: develop
     schedule: {interval: weekly}
     cooldown: {default-days: 7}
+    ignore: [{dependency-name: "*", update-types: ["version-update:semver-major"]}]
   - package-ecosystem: npm
     directory: /frontend
+    target-branch: develop
     schedule: {interval: weekly}
     cooldown: {default-days: 7}
+    ignore: [{dependency-name: "*", update-types: ["version-update:semver-major"]}]
   - package-ecosystem: docker
     directory: /
+    target-branch: develop
     schedule: {interval: weekly}
+    ignore: [{dependency-name: "*", update-types: ["version-update:semver-major"]}]
   - package-ecosystem: github-actions
     directory: /
+    target-branch: develop
     schedule: {interval: weekly}
+    ignore: [{dependency-name: "*", update-types: ["version-update:semver-major"]}]
