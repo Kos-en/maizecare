@@ -1,0 +1,13 @@
+# Render Blueprint: New -> Blueprint -> pick this repo. Free plan, no card needed.
+services:
+  - type: web
+    name: maize-severity
+    runtime: docker
+    plan: free
+    dockerfilePath: ./docker/Dockerfile.lite
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: MAIZE_ARTIFACTS
+        value: /app/artifacts
