@@ -9,16 +9,16 @@ install:
 	pip install -e ".[dev]"          # add ,train if torch is not installed
 
 data:                                # clean, dedup and split new images (safe to re-run)
-	python -m maize.prepare --raw $(RAW) --data-root $(DATA)
+	maize-prepare --raw $(RAW) --data-root $(DATA)
 
 verify:                              # fail if any near-copy crosses train/val
-	python -m maize.prepare --verify --data-root $(DATA)
+	maize-prepare --verify --data-root $(DATA)
 
 train:                               # also exports model.onnx
-	python -m maize.train --data-root $(DATA) --out $(MODEL)
+	maize-train --data-root $(DATA) --out $(MODEL)
 
 eval:                                # also writes calibration.json
-	python -m maize.evaluate --data-root $(DATA) --model-dir $(MODEL)
+	maize-evaluate --data-root $(DATA) --model-dir $(MODEL)
 
 release:                             # the 3 small files the web app ships with (commit them)
 	mkdir -p release

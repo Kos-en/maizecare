@@ -1,6 +1,6 @@
 """Train the autoencoder on healthy leaves only (train split of the manifest).
 
-    python -m maize.train --epochs 5 --out models/test
+    maize-train --epochs 5 --out models/test
 
 Writes healthy_autoencoder.pt, model.onnx, history.csv and meta.json to the output folder.
 meta.json holds data_version, a hash of the images used, to trace a model to its data.
@@ -64,7 +64,7 @@ def main(argv=None):
     train_rows = select(df, label=HEALTHY, split="train")
     val_rows = select(df, label=HEALTHY, split="val")
     if train_rows.empty or val_rows.empty:
-        raise SystemExit("No healthy train/val images in the manifest. Run `python -m maize.prepare --raw ...` first.")
+        raise SystemExit("No healthy train/val images in the manifest. Run `maize-prepare --raw ...` first.")
     print(f"Device: {device}   healthy train={len(train_rows)}  val={len(val_rows)}")
 
     # images come from the cache: the first run reads the photos once, later runs load instantly
@@ -111,6 +111,3 @@ def main(argv=None):
     pd.DataFrame(history).to_csv(out / "history.csv", index=False)
     print(f"Saved model to {out}  (data_version={meta['data_version']})")
 
-
-if __name__ == "__main__":
-    main()

@@ -1,7 +1,7 @@
 """Evaluate a trained model: false-positive check on healthy, error by class, correlation with
 the formula severity, heat maps. Output goes to <model-dir>/eval/; also writes calibration.json.
 
-    python -m maize.evaluate --model-dir models/ae
+    maize-evaluate --model-dir models/ae
 """
 from __future__ import annotations
 
@@ -166,7 +166,3 @@ def main(argv=None):
 
     (out / "metrics.json").write_text(json.dumps(results, indent=2))
     print(f"\nWrote results to {out}")
-
-
-if __name__ == "__main__":
-    main()

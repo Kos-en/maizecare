@@ -1,7 +1,7 @@
 """Clean new images and add them to data/manifest.csv. Safe to re-run.
 
-    python -m maize.prepare --raw /path/to/raw     # raw/<Class>/*.jpg, class = folder name
-    python -m maize.prepare --verify               # check the manifest for train/val leakage
+    maize-prepare --raw /path/to/raw     # raw/<Class>/*.jpg, class = folder name
+    maize-prepare --verify               # check the manifest for train/val leakage
 
 Files already in the manifest are skipped, and an existing image never changes group or split.
 Unusable images are kept in the manifest with a status instead of being dropped.
@@ -201,7 +201,3 @@ def main(argv=None):
     n = count_leaks(df, a.hamming)
     print(f"\nleak check: {n} near-copy pairs cross train/val.")
     raise SystemExit(1 if n else 0)
-
-
-if __name__ == "__main__":
-    main()

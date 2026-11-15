@@ -21,15 +21,16 @@ frontend/         plain TypeScript UI, compiled to static files
 ## Workflow
 
 ```bash
-pip install -e ".[dev]"            # add ",train" if torch isn't installed (Colab has it)
+pip install -e ".[dev]"     # installs the maize-* commands; add ",train" if torch isn't installed (Colab has it)
 
 # first run: point at your cleaned folder (Healthy/ MLND/ MSV/ MLB/ subfolders)
-python -m maize.prepare --raw "/path/to/cv_datasets_cleaned"
+maize-prepare --raw "/path/to/cv_datasets_cleaned"
 # later: drop new images into <raw>/<Class>/ and run the same command again
 
-python -m maize.train              # notebook settings: 20 epochs, lr 1e-3, batch 64
-python -m maize.evaluate           # results, figures and calibration.json in models/ae/eval/
+maize-train                 # notebook settings: 20 epochs, lr 1e-3, batch 64
+maize-evaluate              # results, figures and calibration.json in models/ae/eval/
 ```
+Each command takes `--help`.
 
 Set `MAIZE_DATA_ROOT` (or `--data-root`) to where `manifest.csv` should live; it can be a Drive folder.
 Retraining is manual. Each model records the `data_version` it was trained on in `meta.json`.
@@ -42,7 +43,7 @@ Retraining is manual. Each model records the `data_version` it was trained on in
 - Bad data is recorded in the `status` column, not dropped: `bad_image`, `too_small`, `duplicate_exact`,
   `label_conflict` (same picture under another class), `split_conflict`.
 - New groups get a split from their hash (`val_frac`, default 15%), so arrival order does not matter.
-- `python -m maize.prepare --verify` re-checks the whole manifest for leakage (exit code 1 if any).
+- `maize-prepare --verify` re-checks the whole manifest for leakage (exit code 1 if any).
 
 ## Web app
 
@@ -90,9 +91,9 @@ import os
 DRIVE = "/content/drive/MyDrive/maize_data"
 os.environ["MAIZE_DATA_ROOT"] = DRIVE
 
-!python -m maize.prepare --raw {DRIVE}/raw        # update manifest (CPU; safe to re-run after adding images)
-!python -m maize.train --out /content/drive/MyDrive/maize_models/ae   # first run builds the cache (slow once)
-!python -m maize.evaluate --model-dir /content/drive/MyDrive/maize_models/ae
+!maize-prepare --raw {DRIVE}/raw        # update manifest (CPU; safe to re-run after adding images)
+!maize-train --out /content/drive/MyDrive/maize_models/ae   # first run builds the cache (slow once)
+!maize-evaluate --model-dir /content/drive/MyDrive/maize_models/ae
 ```
 If a session dies, nothing is lost: the manifest, cache and models are on Drive.
 
@@ -102,6 +103,6 @@ If a session dies, nothing is lost: the manifest, cache and models are on Drive.
 - Figures are saved to disk instead of `plt.show()`.
 - Group assignment is incremental (see above) instead of one-off complete-linkage clustering.
 
-## Not built yet (branch `main` has an earlier, larger TF/Keras scaffold for reference)
+## Not built yet (tag `old-keras-scaffold` has an earlier, larger TF/Keras scaffold for reference)
 Stage-1 classifier (disease name + retake-if-unsure), leaf masking, a held-out test split. The serving
 code is deliberately framework-neutral (ONNX), so a PyTorch classifier slots in next to the autoencoder.
