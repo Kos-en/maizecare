@@ -1,0 +1,8 @@
+# Slim serving image (no torch/pandas): ONNX Runtime + OpenCV + FastAPI.
+# Upper bounds guard against surprise major bumps; pin exact versions after the first good build.
+numpy<3
+opencv-python-headless<5
+onnxruntime<2
+fastapi<1
+uvicorn<1
+python-multipart<1

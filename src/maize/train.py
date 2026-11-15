@@ -2,7 +2,7 @@
 
     python -m maize.train                       # defaults = notebook settings
     python -m maize.train --epochs 5 --out models/test
-Writes models/ae/{healthy_autoencoder.pt, history.csv, meta.json}. meta.json records which
+Writes models/ae/{healthy_autoencoder.pt, model.onnx, history.csv, meta.json}. meta.json records which
 data the model was trained on (data_version) so any model can be traced to its dataset.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from .autoencoder import ConvAutoencoder, LeafDataset, pick_device, save_model
+from .autoencoder import ConvAutoencoder, LeafDataset, export_onnx, pick_device, save_model
 from .data import HEALTHY, data_root, load_manifest, select
 
 
@@ -103,6 +103,7 @@ def main(argv=None):
             "final_train_loss": history[-1]["train_loss"], "final_val_loss": history[-1]["val_loss"],
             "args": vars(a), "torch": torch.__version__, "git_commit": git_commit(), "device": device}
     save_model(model, out, meta)
+    export_onnx(model, out / "model.onnx")
     pd.DataFrame(history).to_csv(out / "history.csv", index=False)
     print(f"Saved model to {out}  (data_version={meta['data_version']})")
 

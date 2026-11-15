@@ -10,3 +10,8 @@ __pycache__/
 # data and trained weights live on Drive / locally, not in git
 data/
 models/
+
+# built frontend + local release are handled explicitly
+frontend/node_modules/
+frontend/dist/
+static/

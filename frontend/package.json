@@ -1,0 +1,12 @@
+{
+  "name": "maize-frontend",
+  "private": true,
+  "version": "0.2.0",
+  "scripts": {
+    "build": "tsc && cp public/* dist/",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

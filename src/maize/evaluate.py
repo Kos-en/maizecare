@@ -100,6 +100,20 @@ def main(argv=None):
     plt.savefig(out / "error_by_class.png", dpi=120)
     plt.close()
 
+    # calibration for the web service: score = clip((e - median_healthy) / (p99_diseased - median_healthy), 0, 1)
+    disease_err = [e for c, e in class_errors.items() if c != HEALTHY]
+    if disease_err:
+        e_d99 = float(np.percentile(np.concatenate(disease_err), 99))
+        e_med = float(np.median(val_err))
+        if e_d99 > e_med:
+            meta = json.loads((Path(a.model_dir) / "meta.json").read_text())
+            (Path(a.model_dir) / "calibration.json").write_text(json.dumps({
+                "e_healthy_median": e_med, "e_healthy_p95": threshold, "e_disease_p99": e_d99,
+                "data_version": meta.get("data_version")}, indent=2))
+            print("Wrote calibration.json")
+        else:
+            print("WARNING: diseased errors are not above healthy: no calibration.json written.")
+
     # 7. correlation with formula severity (corroboration, not ground truth)
     results["formula_correlation"] = {}
     for d in diseases:

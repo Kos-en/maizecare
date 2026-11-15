@@ -1,0 +1,10 @@
+# Render Blueprint: New -> Blueprint -> pick this repo. Free plan, no card needed.
+services:
+  - type: web
+    name: maize-severity
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true

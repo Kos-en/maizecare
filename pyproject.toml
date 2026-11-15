@@ -14,7 +14,8 @@ dependencies = [
 
 [project.optional-dependencies]
 train = ["torch"]          # on Colab torch is preinstalled: skip this extra there
-dev = ["pytest"]
+serve = ["fastapi", "uvicorn", "python-multipart", "onnxruntime"]
+dev = ["pytest", "httpx", "fastapi", "python-multipart"]
 
 [project.scripts]
 maize-prepare = "maize.prepare:main"

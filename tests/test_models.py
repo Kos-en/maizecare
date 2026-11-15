@@ -38,3 +38,15 @@ def test_save_and_load_roundtrip(tmp_path):
     m2 = load_model(tmp_path / "m", "cpu")
     x = torch.rand(1, 3, 128, 128)
     assert torch.allclose(m.eval()(x), m2(x), atol=1e-6)
+
+
+def test_onnx_export_matches_torch(tmp_path):
+    ort = pytest.importorskip("onnxruntime")
+    from maize.autoencoder import export_onnx
+    m = ConvAutoencoder().eval()
+    export_onnx(m, tmp_path / "model.onnx")
+    sess = ort.InferenceSession(str(tmp_path / "model.onnx"), providers=["CPUExecutionProvider"])
+    x = torch.rand(2, 3, 128, 128)
+    out = sess.run(None, {"image": x.numpy()})[0]            # batch of 2: dynamic batch axis works
+    assert out.shape == (2, 3, 128, 128)
+    assert np.allclose(out, m(x).detach().numpy(), atol=1e-4)
