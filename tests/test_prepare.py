@@ -86,7 +86,9 @@ def test_new_data_cleans_itself_and_never_moves_old_splits(world):
     healthy = old_df[old_df["label"] == "Healthy"].set_index("path")
     h_train = healthy[healthy["split"] == "train"].index[0]
     h_val = healthy[healthy["split"] == "val"].index[0]
-    seed = lambda p: int(p.split("/")[-1].lstrip("hm").split(".")[0])  # file h12.png -> blob seed 12
+
+    def seed(p):  # file h12.png -> blob seed 12
+        return int(p.split("/")[-1].lstrip("hm").split(".")[0])
 
     # a new drop: exact copy, near copies of a train and a val image, corrupt, tiny, brand new
     save(raw, "Healthy", "copy_of_h0.png", Image.open(raw / "Healthy" / "h0.png"))
@@ -97,7 +99,10 @@ def test_new_data_cleans_itself_and_never_moves_old_splits(world):
     save(raw, "Healthy", "brand_new.png", blob(500))
 
     df = prepare(raw, root, val_frac=0.5).set_index("path")
-    st = lambda name: df.loc[[p for p in df.index if p.endswith(name)][0]]  # noqa: E731
+
+    def st(name):  # manifest row of the new file with this name
+        return df.loc[[p for p in df.index if p.endswith(name)][0]]
+
     assert st("copy_of_h0.png")["status"] == "duplicate_exact"
     assert st("corrupt.png")["status"] == "bad_image"
     assert st("tiny.png")["status"] == "too_small"
