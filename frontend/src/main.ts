@@ -4,6 +4,7 @@ import { BANDS, Band, DISEASES, DiseaseKey, bandFor } from "./advice.js";
 interface ScoreResult {
   score: number; // 0 = like a healthy leaf, 1 = as far from healthy as the worst diseased leaves
   within_healthy_range: boolean;
+  model_version: string | null;
 }
 
 type View = "intro" | "loading" | "error" | "result";
@@ -120,7 +121,7 @@ function render(r: ScoreResult): void {
   const b = BANDS[band];
   const pct = Math.round(r.score * 100);
 
-  $("verdict").parentElement?.style.setProperty("--accent", b.color);
+  views.result.style.setProperty("--accent", b.color);
   $("chip").textContent = b.label;
   $("headline").textContent = b.title;
   $("meaning").textContent = b.meaning;
@@ -131,8 +132,8 @@ function render(r: ScoreResult): void {
     seg.style.setProperty("--c", BANDS[key].color);
     return seg;
   }));
-  shareText = `Maize Leaf Check: ${b.label} damage (${pct}%). Recommended action: ${b.action}.`;
-  selectDisease(null);
+  $("model").textContent = `Model ${r.model_version ?? "unknown"} · Advice under review with an extension officer`;
+  shareText = `Mahindi maize leaf analysis: ${b.label} damage (${pct}%). Recommended action: ${b.action}.`;
   show("result");
   animateRing(pct);
   if (matchMedia("(max-width: 860px)").matches) views.result.scrollIntoView({ behavior: "smooth" });
@@ -150,20 +151,17 @@ function animateRing(pct: number): void {
   requestAnimationFrame(tick);
 }
 
-function fact(term: string, body: HTMLElement): HTMLDivElement {
-  const row = el("div");
+function fact(term: string, body: HTMLElement, className = ""): HTMLDivElement {
+  const row = el("div", "", className);
   row.append(el("dt", term), body);
   return row;
 }
 
-function selectDisease(key: DiseaseKey | null): void {
+function selectDisease(key: DiseaseKey): void {
   $("tabs").querySelectorAll<HTMLButtonElement>("button").forEach((tab) => {
     tab.setAttribute("aria-pressed", String(tab.dataset.key === key));
   });
   const panel = $("disease");
-  panel.hidden = key === null;
-  if (key === null) return;
-
   const d = DISEASES[key];
   const steps = el("dd");
   const list = el("ul");
@@ -177,7 +175,7 @@ function selectDisease(key: DiseaseKey | null): void {
   facts.append(
     fact("Signs to look for", el("dd", d.signs)),
     fact("Cause", el("dd", d.cause)),
-    fact("What to do", steps),
+    fact("What to do", steps, "wide"),
     fact("Yield risk", el("dd", d.risk)),
     fact("Source", source),
   );
@@ -199,12 +197,12 @@ function buildTabs(): void {
 
 async function share(): Promise<void> {
   if (navigator.share) {
-    await navigator.share({ title: "Maize Leaf Check", text: shareText }).catch(() => undefined);
+    await navigator.share({ title: "Mahindi", text: shareText }).catch(() => undefined);
     return;
   }
   await navigator.clipboard.writeText(shareText);
   $("share").textContent = "Copied";
-  setTimeout(() => ($("share").textContent = "Share"), 1500);
+  setTimeout(() => ($("share").textContent = "Share result"), 1500);
 }
 
 function reset(): void {
@@ -212,7 +210,7 @@ function reset(): void {
   shutter.hidden = false;
   frame.classList.remove("has-photo");
   show("intro");
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  $("analyse").scrollIntoView({ behavior: "smooth" });
 }
 
 for (const id of ["camera", "gallery"]) {
@@ -239,4 +237,5 @@ $("share").addEventListener("click", () => void share());
 $("again").addEventListener("click", reset);
 
 buildTabs();
+selectDisease("mln");
 show("intro");

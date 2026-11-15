@@ -1,6 +1,6 @@
 {
-  "name": "Maize Leaf Check",
-  "short_name": "Leaf Check",
+  "name": "Mahindi · Maize leaf analysis",
+  "short_name": "Mahindi",
   "description": "Photograph a maize leaf to see how damaged it is and what to do next.",
   "start_url": "/",
   "display": "standalone",

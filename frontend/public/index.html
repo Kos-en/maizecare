@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0f0a" />
-    <meta name="description" content="Photograph a maize leaf to see how damaged it is and what to do next." />
-    <title>Maize Leaf Check</title>
+    <meta name="description" content="Mahindi measures maize leaf damage from a photo and gives next steps based on East African agronomy guidance." />
+    <title>Mahindi · Maize leaf analysis</title>
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
     <link rel="manifest" href="manifest.json" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -15,29 +15,47 @@
   </head>
   <body>
     <header class="top">
-      <a class="brand" href="/">
-        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M7 26c0-11 6-18 19-20-1 12-8 19-19 20z" /><path class="vein" d="M7 26c4-6 9-10 14-14" /></svg>
-        Leaf Check
-      </a>
-      <span class="badge">Research prototype</span>
+      <div class="wrap top-inner">
+        <a class="brand" href="#">
+          <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M7 26c0-11 6-18 19-20-1 12-8 19-19 20z" /><path class="vein" d="M7 26c4-6 9-10 14-14" /></svg>
+          Mahindi
+        </a>
+        <nav class="nav" aria-label="Main">
+          <a href="#analyse">Analyse</a>
+          <a href="#guide">Disease guide</a>
+          <a href="#about">About</a>
+        </nav>
+        <span class="badge">Research prototype</span>
+      </div>
     </header>
 
-    <main class="wrap">
-      <section class="intro">
-        <p class="eyebrow">Maize leaf screening · Strathmore University</p>
-        <h1>Is your maize leaf <span class="hl">healthy?</span></h1>
-        <p class="lede">Take a photo of one leaf. In seconds you'll see how damaged it looks and what to do next.</p>
+    <main>
+      <section class="wrap hero">
+        <p class="eyebrow">Maize leaf analysis</p>
+        <h1>Measure maize leaf damage <span class="hl">in seconds.</span></h1>
+        <p class="lede">Take or upload a photo of a single maize leaf. Mahindi grades how damaged it is and gives clear
+          next steps based on East African agronomy guidance.</p>
+        <ul class="trust">
+          <li><b>3</b><span>major diseases covered</span></li>
+          <li><b>4</b><span>damage levels</span></li>
+          <li><b>0</b><span>photos stored</span></li>
+          <li><b>Any phone</b><span>no app to install</span></li>
+        </ul>
       </section>
 
-      <div class="layout">
-        <section class="card scan">
+      <section id="analyse" class="wrap layout">
+        <div class="card scan">
+          <div class="card-title">
+            <h2>New analysis</h2>
+            <span class="muted small">JPEG, PNG or HEIC</span>
+          </div>
           <div id="frame" class="frame">
             <label id="shutter" class="shutter" for="camera">
               <span class="shutter-ring">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
               </span>
               <strong>Take a photo</strong>
-              <span>or drop one here</span>
+              <span>or drag one here</span>
             </label>
             <img id="photo" alt="Your leaf photo" hidden />
             <div class="scanline" aria-hidden="true"></div>
@@ -45,44 +63,45 @@
           <input id="camera" type="file" accept="image/*" capture="environment" hidden />
           <input id="gallery" type="file" accept="image/*" hidden />
           <div class="actions">
-            <label class="btn primary" for="camera">Camera</label>
-            <label class="btn" for="gallery">Gallery</label>
+            <label class="btn primary" for="camera">Use camera</label>
+            <label class="btn" for="gallery">Upload photo</label>
           </div>
           <ul class="tips">
-            <li>One leaf</li>
+            <li>One leaf per photo</li>
             <li>Daylight, no flash</li>
-            <li>Fill the frame</li>
+            <li>Leaf fills the frame</li>
           </ul>
-        </section>
+        </div>
 
-        <section class="out" aria-live="polite">
-          <div id="v-intro" class="card">
-            <h2 class="h2">How it works</h2>
+        <div class="out" aria-live="polite">
+          <div id="v-intro" class="card placeholder">
+            <div class="ph-ring" aria-hidden="true"></div>
+            <h2>Your results will appear here</h2>
             <ol class="how">
-              <li><b>Photograph</b> one maize leaf in daylight.</li>
-              <li><b>Compare.</b> The model has learned what healthy maize leaves look like and measures how far yours is from healthy.</li>
-              <li><b>Act.</b> You get a damage level and clear next steps based on East African crop research.</li>
+              <li>Photograph one maize leaf</li>
+              <li>We compare it with thousands of healthy leaves</li>
+              <li>You get a damage level and what to do next</li>
             </ol>
           </div>
 
           <div id="v-loading" class="card" hidden>
-            <h2 class="h2">Checking your leaf</h2>
+            <div class="card-title"><h2>Analysing your leaf</h2></div>
             <ol id="progress" class="progress">
               <li>Preparing photo</li>
               <li>Comparing with healthy leaves</li>
               <li>Grading damage</li>
             </ol>
-            <p id="wake" class="small muted" hidden>Waking up the server. The first check can take up to a minute.</p>
+            <p id="wake" class="small muted" hidden>Starting the server. The first analysis of the day can take up to a minute.</p>
           </div>
 
           <div id="v-error" class="card error" role="alert" hidden>
-            <h2 class="h2">That didn't work</h2>
+            <div class="card-title"><h2>We couldn't analyse that photo</h2></div>
             <p id="error-text" class="muted"></p>
             <button id="retry" class="btn primary" type="button">Try again</button>
           </div>
 
           <div id="v-result" class="result" hidden>
-            <article id="verdict" class="card verdict">
+            <article class="card verdict">
               <div class="verdict-top">
                 <div class="ring">
                   <svg viewBox="0 0 120 120" aria-hidden="true">
@@ -101,33 +120,72 @@
             </article>
 
             <article class="card">
-              <div class="card-head">
-                <h2 class="h2">What to do</h2>
+              <div class="card-title">
+                <h2>Recommended next steps</h2>
                 <span id="action" class="pill"></span>
               </div>
               <ol id="steps" class="steps"></ol>
             </article>
 
-            <article class="card">
-              <h2 class="h2">Which disease does it look like?</h2>
-              <p class="small muted">Compare the signs on your leaf. Not sure? Show this result to your extension officer.</p>
-              <div id="tabs" class="tabs" role="group" aria-label="Diseases"></div>
-              <div id="disease" class="disease" hidden></div>
-            </article>
-
-            <p class="note">Draft advice from CIMMYT, NARO and ILRI research in East Africa, under review with an extension
-              officer. This app grades leaf damage; it does not yet name the disease.</p>
+            <a class="card link-card" href="#guide">
+              <span>
+                <strong>Which disease is it?</strong>
+                <span class="muted small">Compare the signs on your leaf with the disease guide.</span>
+              </span>
+              <span class="arrow" aria-hidden="true">→</span>
+            </a>
 
             <div class="dock">
-              <button id="share" class="btn" type="button">Share</button>
-              <button id="again" class="btn primary" type="button">Scan another leaf</button>
+              <button id="share" class="btn" type="button">Share result</button>
+              <button id="again" class="btn primary" type="button">Analyse another leaf</button>
             </div>
+            <p id="model" class="note"></p>
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
+
+      <section id="guide" class="wrap section">
+        <div class="section-head">
+          <p class="eyebrow">Disease guide</p>
+          <h2>Common maize diseases in East Africa</h2>
+          <p class="muted">Compare the signs on your leaf. If you're unsure, show your result to your local extension officer.</p>
+        </div>
+        <div class="card">
+          <div id="tabs" class="tabs" role="group" aria-label="Diseases"></div>
+          <div id="disease" class="disease"></div>
+        </div>
+      </section>
+
+      <section id="about" class="wrap section">
+        <div class="section-head">
+          <p class="eyebrow">About</p>
+          <h2>How Mahindi works</h2>
+        </div>
+        <div class="about">
+          <div class="card">
+            <h3>The model</h3>
+            <p class="muted">A neural network trained only on healthy maize leaves. The further your leaf is from what it learned,
+              the higher the damage level.</p>
+          </div>
+          <div class="card">
+            <h3>Your privacy</h3>
+            <p class="muted">Photos are analysed in memory and deleted straight away. Nothing is stored and no account is needed.</p>
+          </div>
+          <div class="card">
+            <h3>The advice</h3>
+            <p class="muted">Summarised from CIMMYT, NARO and ILRI research in East Africa, and under review with an
+              agricultural extension officer.</p>
+          </div>
+        </div>
+      </section>
     </main>
 
-    <footer class="foot">Photos are checked in memory and never stored.</footer>
+    <footer class="foot">
+      <div class="wrap foot-inner">
+        <span>© 2026 Mahindi · MSc Data Science &amp; Analytics, Strathmore University</span>
+        <span>Not a substitute for advice from your local extension officer.</span>
+      </div>
+    </footer>
     <script type="module" src="main.js"></script>
   </body>
 </html>
