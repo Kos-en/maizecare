@@ -13,8 +13,13 @@ src/maize/
   train.py        train on healthy train split, writes models/ae/
   evaluate.py     false-positive check, error by class, formula correlation, heat maps
   severity.py     the notebook's OpenCV formula severity (comparison signal only)
-tests/            pytest (data-pipeline tests need no torch)
-Makefile          make data | verify | train | eval | test
+  preprocess.py   photo -> model input; shared by training AND the web app
+  serve.py        FastAPI app: /api/score + serves the built frontend       (no torch)
+frontend/         ~100 lines of TypeScript (no framework) -> compiled to static files
+Dockerfile        builds the frontend, installs the slim server, ships release/
+render.yaml       Render blueprint (free plan)
+tests/            pytest (data-pipeline + web tests need no torch)
+Makefile          make data | verify | train | eval | release | serve | docker | test
 ```
 
 ## Workflow
@@ -48,6 +53,24 @@ Set `MAIZE_DATA_ROOT` (or `--data-root`) to where `manifest.csv` should live; it
 
 Retraining is deliberately **manual** (`make train`): every model records the `data_version` it was
 trained on in `meta.json`, so a result can always be traced to its exact dataset.
+
+## Web app (production path)
+
+```
+make train eval    # train writes model.onnx, eval writes calibration.json
+make release       # copies model.onnx + calibration.json + meta.json into release/  (commit these, they are small)
+make serve         # local: builds the TypeScript, starts the app at http://localhost:8000
+make docker        # same thing in the production container
+```
+`serve.py` starts, loads `release/`, and serves the compiled frontend from the same process, so there is
+one container and one URL. The model is exported to ONNX at train time and served with `onnxruntime`
+(no torch in production: small image, fits Render's free 512 MB). The app returns a reconstruction error,
+a 0-1 severity score (`(e - median healthy) / (p99 diseased - median healthy)`) and an error heat map.
+It does **not** name the disease yet: that needs the stage-1 classifier.
+
+**Deploy on Render (free, no card):** push the repo to GitHub, Render -> New -> Blueprint -> select the repo.
+Free instances sleep after 15 min idle (first request ~1 min) and have ~0.1 CPU. Photos are processed in
+memory and never stored.
 
 ## Colab
 
@@ -88,6 +111,6 @@ os.environ["MAIZE_DATA_ROOT"] = "/content/data"
 - Figures are saved to disk instead of `plt.show()`.
 - Group assignment is incremental (see above) instead of one-off complete-linkage clustering.
 
-## Not built yet (see git branch `main` for an earlier, larger TF/Keras scaffold)
-Stage-1 classifier, leaf masking, test split, web service / Docker / Render. They depend on whether the
-classifier is done in PyTorch (as the notebook) or Keras (as the proposal says).
+## Not built yet (branch `main` has an earlier, larger TF/Keras scaffold for reference)
+Stage-1 classifier (disease name + retake-if-unsure), leaf masking, a held-out test split. The serving
+code is deliberately framework-neutral (ONNX), so a PyTorch classifier slots in next to the autoencoder.

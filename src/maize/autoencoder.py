@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from .data import IMG_SIZE
+from .preprocess import IMG_SIZE, to_input
 
 WEIGHTS = "healthy_autoencoder.pt"
 
@@ -21,8 +21,8 @@ def pick_device() -> str:
 
 
 class LeafDataset(Dataset):
-    def __init__(self, paths, img_size: int = IMG_SIZE):
-        self.paths, self.img_size = list(paths), img_size
+    def __init__(self, paths):
+        self.paths = list(paths)
 
     def __len__(self):
         return len(self.paths)
@@ -31,10 +31,7 @@ class LeafDataset(Dataset):
         img = cv2.imread(str(self.paths[idx]))
         if img is None:
             raise FileNotFoundError(f"Could not read {self.paths[idx]}")
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = cv2.resize(img, (self.img_size, self.img_size))
-        img = img.astype(np.float32) / 255.0
-        return torch.from_numpy(img).permute(2, 0, 1)
+        return torch.from_numpy(to_input(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
 
 
 class ConvAutoencoder(nn.Module):
@@ -79,3 +76,15 @@ def load_model(model_dir: Path, device: str) -> ConvAutoencoder:
     model = ConvAutoencoder().to(device)
     model.load_state_dict(torch.load(Path(model_dir) / WEIGHTS, map_location=device))
     return model.eval()
+
+
+def export_onnx(model, path: Path) -> None:
+    """ONNX file for the web service (served with onnxruntime: no torch in production)."""
+    model = model.eval().cpu()
+    dummy = torch.zeros(1, 3, IMG_SIZE, IMG_SIZE)
+    kw = dict(input_names=["image"], output_names=["recon"], opset_version=17,
+              dynamic_axes={"image": {0: "batch"}, "recon": {0: "batch"}})
+    try:
+        torch.onnx.export(model, dummy, str(path), dynamo=False, **kw)  # torch >= 2.5
+    except TypeError:
+        torch.onnx.export(model, dummy, str(path), **kw)

@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pandas as pd
 
-IMG_SIZE = 128
+from .preprocess import IMG_SIZE  # noqa: F401  (re-export)
+
 HEALTHY = "Healthy"
 
 COLUMNS = ["path", "label", "sha1", "phash", "ahash", "group", "split", "status", "added_at"]

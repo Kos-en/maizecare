@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Maize Leaf Check</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Maize Leaf Check</h1>
+      <p class="sub">Take or upload a photo of one maize leaf. The first request can take about a minute while the server wakes up.</p>
+
+      <label class="button" id="pick">Take or choose a photo
+        <input type="file" id="file" accept="image/*" capture="environment" hidden />
+      </label>
+
+      <img id="preview" class="preview" alt="Your leaf photo" hidden />
+      <div id="message" class="card" hidden></div>
+
+      <section id="result" class="card" hidden>
+        <h2 id="headline"></h2>
+        <div class="bar"><div id="fill"></div></div>
+        <p class="sub" id="detail"></p>
+        <figure>
+          <img id="heatmap" alt="Where the leaf looks least healthy" />
+          <figcaption>Where the leaf looks least healthy</figcaption>
+        </figure>
+        <p class="sub">Severity is estimated from how far this leaf is from a healthy one. It does not name the disease.</p>
+      </section>
+    </main>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
