@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from .data import COLUMNS, data_root, load_manifest, save_manifest
 
@@ -128,6 +129,7 @@ def prepare(raw: Path, root: Path, val_frac: float = VAL_FRAC, hamming: int = HA
     idx = Index(df[df["status"] == "ok"])
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+    print(f"Listing images in {raw} ...", flush=True)
     files = sorted(p for p in raw.rglob("*") if p.suffix.lower() in EXTS)
     loose = {p for p in files if len(p.relative_to(raw).parts) < 2}
     for p in sorted(loose):
@@ -135,7 +137,7 @@ def prepare(raw: Path, root: Path, val_frac: float = VAL_FRAC, hamming: int = HA
     todo = [(p, rel) for p in files if p not in loose and (rel := _rel(p, root)) not in known_paths]
 
     new_rows = []
-    for p, rel in todo:
+    for p, rel in tqdm(todo, desc="checking new images", unit="img"):
         label = p.relative_to(raw).parts[0]
         info = _inspect(p)
         status, group, split = classify(label, info, known_sha, idx, hamming, val_frac)
