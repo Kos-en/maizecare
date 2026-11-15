@@ -1,0 +1,17 @@
+# Weekly update PRs; cooldown skips releases younger than 7 days (most supply-chain attacks are caught by then).
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule: {interval: weekly}
+    cooldown: {default-days: 7}
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule: {interval: weekly}
+    cooldown: {default-days: 7}
+  - package-ecosystem: docker
+    directory: /
+    schedule: {interval: weekly}
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}

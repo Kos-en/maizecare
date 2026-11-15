@@ -3,10 +3,10 @@ RAW ?= data/raw
 DATA ?= data
 MODEL ?= models/ae
 
-.PHONY: install data verify train eval release frontend serve docker test all
+.PHONY: install data verify train eval release frontend serve docker test lock all
 
-install:
-	pip install -e ".[dev]"          # add ,train if torch is not installed
+install:                             # everything except torch (Colab has it; add ,train elsewhere)
+	pip install -e ".[data,serve]" --group dev
 
 data:                                # clean, dedup and split new images (safe to re-run)
 	maize-prepare --raw $(RAW) --data-root $(DATA)
@@ -25,9 +25,12 @@ release:                             # the 3 small files the web app ships with 
 	cp $(MODEL)/model.onnx $(MODEL)/calibration.json $(MODEL)/meta.json release/
 
 frontend:                            # compile TypeScript -> frontend/dist
-	cd frontend && npm ci && npm run build
+	cd frontend && npm ci --ignore-scripts && npm run build
 
-serve: frontend                      # run the app locally on :8000 (needs `pip install -e ".[serve]"`)
+lock:                                # re-pin uv.lock from pyproject.toml (only releases >= 7 days old)
+	uv lock --upgrade
+
+serve: frontend                      # run the app locally on :8000 (needs the serve extra)
 	MAIZE_MODEL_DIR=release MAIZE_STATIC_DIR=frontend/dist uvicorn maize.serve:app --port 8000
 
 docker:

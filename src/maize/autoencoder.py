@@ -71,7 +71,7 @@ def save_model(model, out_dir: Path, meta: dict) -> None:
 
 def load_model(model_dir: Path, device: str) -> ConvAutoencoder:
     model = ConvAutoencoder().to(device)
-    model.load_state_dict(torch.load(Path(model_dir) / WEIGHTS, map_location=device))
+    model.load_state_dict(torch.load(Path(model_dir) / WEIGHTS, map_location=device, weights_only=True))
     return model.eval()
 
 

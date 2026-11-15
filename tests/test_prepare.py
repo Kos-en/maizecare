@@ -9,8 +9,8 @@ from maize.prepare import Index, count_leaks, decide, prepare
 # ---- pure decision logic (numpy only) ---------------------------------------------------
 def make_index(rows):
     """rows: (phash_int, ahash_int, group, split, label)"""
-    df = pd.DataFrame([{"phash": f"{p:016x}", "ahash": f"{a:016x}", "group": g, "split": s, "label": l}
-                       for p, a, g, s, l in rows])
+    df = pd.DataFrame([{"phash": f"{p:016x}", "ahash": f"{a:016x}", "group": g, "split": s, "label": lab}
+                       for p, a, g, s, lab in rows])
     return Index(df)
 
 
