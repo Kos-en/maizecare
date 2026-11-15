@@ -9,7 +9,7 @@ description = "Maize leaf severity: healthy-only autoencoder + incremental data 
 requires-python = ">=3.12"
 # The only place dependencies are declared; uv.lock pins exact versions + hashes (`make lock`).
 # Floors skip versions with known CVEs. opencv stays on 4.x to match training on Colab.
-dependencies = ["numpy<3", "opencv-python-headless>=4.8.1.78,<5"]  # preprocess.py, shared by everything
+dependencies = ["numpy<3", "opencv-python-headless>=5.0.0.93,<6"]  # preprocess.py, shared by everything
 
 [project.optional-dependencies]
 data = ["pandas", "pillow>=10.3", "imagehash", "tqdm"]                       # maize-prepare, image cache
