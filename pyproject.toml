@@ -6,16 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "maize"
 version = "0.2.0"
 description = "Maize leaf severity: healthy-only autoencoder + incremental data cleaning"
-requires-python = ">=3.10"
-dependencies = [
-  "numpy", "pandas", "pillow", "imagehash", "opencv-python-headless",
-  "scipy", "matplotlib", "tqdm",
-]
+requires-python = ">=3.12"
+# The only place dependencies are declared; uv.lock pins exact versions + hashes (`make lock`).
+# Floors skip versions with known CVEs. opencv stays on 4.x to match training on Colab.
+dependencies = ["numpy<3", "opencv-python-headless>=4.8.1.78,<5"]  # preprocess.py, shared by everything
 
 [project.optional-dependencies]
-train = ["torch"]          # on Colab torch is preinstalled: skip this extra there
-serve = ["fastapi", "uvicorn", "python-multipart", "onnxruntime"]
-dev = ["pytest", "httpx", "fastapi", "python-multipart"]
+data = ["pandas", "pillow>=10.3", "imagehash", "tqdm"]                       # maize-prepare, image cache
+train = ["maize[data]", "torch>=2.6", "scipy", "matplotlib"]  # <2.6: torch.load RCE (CVE-2025-32434)
+serve = ["fastapi>=0.120,<1", "uvicorn<1", "python-multipart>=0.0.18,<1", "onnxruntime<2"]  # the web app only
+
+[dependency-groups]
+dev = ["pytest", "httpx", "ruff", "pip-audit"]
 
 [project.scripts]
 maize-prepare = "maize.prepare:main"
@@ -24,6 +26,10 @@ maize-evaluate = "maize.evaluate:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.uv]
+required-version = ">=0.13"
+exclude-newer = "7 days"  # never lock a release younger than a week (supply-chain cooldown)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

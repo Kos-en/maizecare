@@ -1,7 +1,0 @@
-# Slim serving image (no torch/pandas). Upper bounds only; pin exact versions once a build works.
-numpy<3
-opencv-python-headless<5
-onnxruntime<2
-fastapi<1
-uvicorn<1
-python-multipart<1

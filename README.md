@@ -21,7 +21,7 @@ frontend/         plain TypeScript UI, compiled to static files
 ## Workflow
 
 ```bash
-pip install -e ".[dev]"     # installs the maize-* commands; add ",train" if torch isn't installed (Colab has it)
+make install                # pip install -e ".[data,serve]" --group dev; add the train extra if torch isn't installed
 
 # first run: point at your cleaned folder (Healthy/ MLND/ MSV/ MLB/ subfolders)
 maize-prepare --raw "/path/to/cv_datasets_cleaned"
@@ -59,7 +59,24 @@ and fits Render's free 512 MB. The app returns the reconstruction error and a 0-
 stage-1 classifier. Heat maps are a developer tool (`maize-evaluate`), not shown to users; production
 monitoring is planned in [docs/observability.md](docs/observability.md).
 
-Deploy on Render (free): push to GitHub, then Render -> New -> Blueprint -> select the repo.
+## Dependencies, CI and deployment
+
+`pyproject.toml` is the only place dependencies are declared, split by use: the base (numpy, OpenCV),
+`data`, `train` and `serve` extras, and a `dev` group. `uv.lock` pins every package to an exact version
+and hash; `make lock` refreshes it (only releases at least 7 days old). The Docker image installs just
+the `serve` extra from the lock, so production runs exactly what CI tested.
+
+`.github/workflows/ci.yml` on every push and PR: ruff, pytest, `pip-audit` on the shipped dependencies,
+`npm audit` and the frontend build. On a push to `main` it then builds the image, pushes it to GitHub's
+registry (`ghcr.io/<user>/<repo>`, tagged `latest` and the commit SHA) and tells Render to deploy that
+exact image. Dependabot opens weekly update PRs.
+
+One-time setup on Render (free plan):
+1. Push to `main` once so the image exists in GHCR, then make the package public
+   (GitHub -> Packages -> maize -> Package settings), or add GHCR credentials in Render.
+2. Render -> New -> Web Service -> Existing image -> `ghcr.io/<user>/<repo>:latest`, plan Free,
+   health check path `/health` (or put the URL in `render.yaml` and use New -> Blueprint).
+3. Copy the service's Deploy Hook URL (Settings) into the GitHub repo secret `RENDER_DEPLOY_HOOK_URL`.
 Free instances sleep after 15 min idle (first request takes about a minute). Photos are never stored.
 
 ## Image cache
