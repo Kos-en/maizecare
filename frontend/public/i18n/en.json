@@ -1,0 +1,188 @@
+{
+  "app": {
+    "name": "MaizeCare",
+    "title": "MaizeCare · Maize disease detection",
+    "badge": "Research prototype"
+  },
+  "nav": {
+    "analyse": "Analyse",
+    "guide": "Disease guide",
+    "about": "About"
+  },
+  "hero": {
+    "eyebrow": "AI crop assistant for maize farmers",
+    "title_1": "Spot maize disease early.",
+    "title_2": "Protect your harvest.",
+    "lede": "Take a photo of a maize leaf. We identify Maize Lethal Necrosis, Maize Streak Virus or Northern Leaf Blight, show how severe it is, and tell you exactly what to do next."
+  },
+  "trust": {
+    "diseases": "diseases detected",
+    "levels": "severity levels",
+    "photos": "photos stored",
+    "languages": "English & Kiswahili"
+  },
+  "scan": {
+    "title": "New analysis",
+    "formats": "JPEG, PNG or HEIC",
+    "take": "Take a photo",
+    "drop": "or drag one here",
+    "camera": "Use camera",
+    "upload": "Upload photo",
+    "tip_one": "One leaf per photo",
+    "tip_light": "Daylight, no flash",
+    "tip_frame": "Leaf fills the frame"
+  },
+  "intro": {
+    "title": "Your results will appear here",
+    "step_1": "Photograph one maize leaf",
+    "step_2": "We identify the disease and measure the damage",
+    "step_3": "You get clear steps to protect your crop"
+  },
+  "loading": {
+    "title": "Analysing your leaf",
+    "prepare": "Preparing photo",
+    "identify": "Identifying the disease",
+    "grade": "Measuring the damage",
+    "wake": "Starting the server. The first analysis of the day can take up to a minute."
+  },
+  "error": {
+    "title": "We couldn't analyse that photo",
+    "retry": "Try again",
+    "open": "Could not open that photo. Please use a JPEG or PNG image.",
+    "timeout": "The server took too long to answer. Check your connection and try again.",
+    "offline": "Could not reach the server. Check your internet and try again.",
+    "generic": "Something went wrong. Please try again."
+  },
+  "unsure": {
+    "title": "We're not sure about this photo",
+    "body": "The leaf may be blurry, too far away or partly hidden. Take a new photo of one leaf in daylight so that it fills the frame.",
+    "retake": "Take a new photo"
+  },
+  "result": {
+    "damage": "damage",
+    "confidence": "{pct}% confidence",
+    "healthy_title": "Healthy leaf",
+    "detected": "{disease} detected",
+    "steps": "Recommended next steps",
+    "learn": "Learn about {disease}",
+    "learn_hint": "Signs, cause and how to stop it spreading",
+    "learn_healthy": "Know the warning signs",
+    "learn_healthy_hint": "See what the main maize diseases look like",
+    "share": "Share result",
+    "copied": "Copied",
+    "again": "Analyse another leaf",
+    "model": "Model {version} · Advice under review with an agricultural extension officer",
+    "share_text": "MaizeCare: {result}, {band} ({pct}% damage). Recommended action: {action}."
+  },
+  "bands": {
+    "healthy": {
+      "label": "Healthy",
+      "action": "Monitor",
+      "meaning": "No signs of disease. This leaf looks like a healthy maize leaf.",
+      "steps": [
+        "Keep checking a few plants across the field every week.",
+        "Keep grass weeds down. They shelter the insects that spread maize viruses."
+      ]
+    },
+    "mild": {
+      "label": "Mild",
+      "action": "Watch closely",
+      "meaning": "Early stage: only small parts of the leaf are affected.",
+      "steps": [
+        "Mark this plant and check it again in 3 to 5 days.",
+        "Check the plants around it for the same signs.",
+        "Follow the disease steps below to stop it spreading."
+      ]
+    },
+    "moderate": {
+      "label": "Moderate",
+      "action": "Act now",
+      "meaning": "A clear part of this leaf is damaged.",
+      "steps": [
+        "Follow the disease steps below today.",
+        "Ask an extension officer to confirm before buying any product.",
+        "Check the neighbouring plants for the same signs."
+      ]
+    },
+    "severe": {
+      "label": "Severe",
+      "action": "Remove plant",
+      "meaning": "Most of this leaf is damaged. The plant can spread disease to the rest of the field.",
+      "steps": [
+        "Pull out the plant and destroy it away from the field (bury or burn it).",
+        "Do not leave diseased plants or leaves lying in the field.",
+        "Wash your hands and tools afterwards.",
+        "Tell your extension officer, especially if many plants look like this."
+      ]
+    }
+  },
+  "diseases": {
+    "MLND": {
+      "short": "MLN",
+      "name": "Maize Lethal Necrosis",
+      "kind": "Virus · spread by thrips, aphids and seed",
+      "signs": "Fine yellow specks and stripes from the base of young leaves that join into mottled patches, then dry out from the leaf edges. The youngest leaves can die (\"dead heart\") and cobs stay small.",
+      "cause": "Two viruses together, carried by thrips and aphids, and by contaminated seed, tools and crop residue.",
+      "steps": [
+        "Scout often and pull out infected plants straight away.",
+        "Plant certified seed of MLN-tolerant hybrids.",
+        "Keep grass weeds down, and don't intercrop maize with cabbage, kale or onions.",
+        "Seed dressed with a systemic insecticide protects young plants. Ask an agro-dealer.",
+        "Leave the field without maize for at least 2 months, and rotate with beans or other legumes.",
+        "Clean tools after working in an infected field."
+      ],
+      "risk": "Can destroy the whole crop."
+    },
+    "MSV": {
+      "short": "MSV",
+      "name": "Maize Streak Virus",
+      "kind": "Virus · spread by leafhoppers",
+      "signs": "Narrow, unbroken pale-yellow streaks along the leaf veins, starting on the youngest leaves. Plants infected young stay stunted.",
+      "cause": "A virus carried by small leafhoppers. It does not spread through seed.",
+      "steps": [
+        "Plant a streak-resistant variety. Ask your agro-dealer which ones resist streak in your area.",
+        "Plant early in the season, at the same time as your neighbours.",
+        "Pull out infected young plants early.",
+        "Keep grass weeds down around the field."
+      ],
+      "risk": "Losses of up to 90% on susceptible varieties."
+    },
+    "MLB": {
+      "short": "Leaf blight",
+      "name": "Northern Leaf Blight",
+      "kind": "Fungus · spread by wind and rain",
+      "signs": "Long, cigar-shaped grey-green to tan spots, starting on the lower leaves and moving up the plant. Worse in cool, wet weather.",
+      "cause": "A fungus that survives on old maize residue in the field.",
+      "steps": [
+        "Plant a tolerant or resistant hybrid. This is the most reliable control.",
+        "Rotate maize with another crop.",
+        "Remove or bury maize residue after harvest.",
+        "Use a fungicide only if an extension officer recommends one."
+      ],
+      "risk": "Losses of up to 60% in Kenya."
+    }
+  },
+  "guide": {
+    "eyebrow": "Disease guide",
+    "title": "Common maize diseases in East Africa",
+    "lede": "Compare the signs on your leaf. If you're unsure, show your result to your local extension officer.",
+    "signs": "Signs to look for",
+    "cause": "Cause",
+    "what": "What to do",
+    "risk": "Yield risk"
+  },
+  "about": {
+    "eyebrow": "About",
+    "title": "How MaizeCare works",
+    "model_title": "Two AI models",
+    "model_body": "The first model recognises the disease. The second learned what healthy maize leaves look like and measures how far your leaf is from healthy.",
+    "privacy_title": "Your privacy",
+    "privacy_body": "Photos are analysed in memory and deleted straight away. Nothing is stored and no account is needed.",
+    "advice_title": "The advice",
+    "advice_body": "Based on East African crop research and under review with an agricultural extension officer."
+  },
+  "footer": {
+    "rights": "© 2026 MaizeCare",
+    "disclaimer": "Not a substitute for advice from your local extension officer."
+  }
+}

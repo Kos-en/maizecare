@@ -2,8 +2,9 @@
 RAW ?= data/raw
 DATA ?= data
 MODEL ?= models/ae
+CLF ?= models/clf
 
-.PHONY: install data verify train eval release frontend serve docker test lock all
+.PHONY: install data verify train eval classifier release frontend serve docker test lock all
 
 install:                             # everything except torch (Colab has it; add ,train elsewhere)
 	pip install -e ".[data,serve]" --group dev
@@ -20,9 +21,13 @@ train:                               # also exports model.onnx
 eval:                                # also writes calibration.json
 	maize-evaluate --data-root $(DATA) --model-dir $(MODEL)
 
-release:                             # the 3 small files the web app ships with (commit them)
+classifier:                          # stage 1: which disease (also exports classifier.onnx)
+	maize-train-classifier --data-root $(DATA) --out $(CLF)
+
+release:                             # the small files the web app ships with (commit them)
 	mkdir -p release
 	cp $(MODEL)/model.onnx $(MODEL)/calibration.json $(MODEL)/meta.json release/
+	cp $(CLF)/classifier.onnx $(CLF)/classifier.json release/
 
 frontend:                            # compile TypeScript -> frontend/dist
 	cd frontend && npm ci --ignore-scripts && npm run build
@@ -39,4 +44,4 @@ docker:
 test:
 	pytest -q
 
-all: data verify train eval release
+all: data verify train eval classifier release

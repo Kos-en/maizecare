@@ -1,9 +1,12 @@
-# Maize leaf severity: healthy-only autoencoder
+# MaizeCare: maize leaf disease and severity
 
-A convolutional autoencoder trained on Healthy leaves only. Its reconstruction error on a
-diseased leaf (MLND / MSV / MLB) is the severity signal, so no severity labels are needed.
-The repo is the notebook `maize_severity_autoencoder` as scripts, plus an incremental
-data-cleaning step so new images can be added safely.
+Two models behind one web app for farmers (English and Kiswahili):
+1. **Classifier** (Keras CNN, transfer learning): Healthy / MLND / MSV / MLB, with a confidence so
+   unclear photos get "please retake" instead of a guess.
+2. **Autoencoder** (PyTorch) trained on Healthy leaves only. Its reconstruction error on a diseased
+   leaf is the severity signal, so no severity labels are needed.
+
+New images go through the same incremental cleaning step (`maize-prepare`) before either model sees them.
 
 ```
 src/maize/
@@ -11,6 +14,7 @@ src/maize/
   data.py         manifest helpers
   autoencoder.py  model, dataset, reconstruction_errors, save/load/ONNX export
   train.py        train on the healthy train split, writes models/ae/
+  classifier.py   Keras CNN (MobileNetV2 / V3 / EfficientNet-B0 / ResNet50), writes models/clf/
   evaluate.py     false-positive check, error by class, formula correlation, heat maps
   severity.py     the notebook's OpenCV formula severity (comparison only)
   preprocess.py   photo -> model input, shared by training and the web app
@@ -27,8 +31,9 @@ make install                # pip install -e ".[data,serve]" --group dev; add th
 maize-prepare --raw "/path/to/cv_datasets_cleaned"
 # later: drop new images into <raw>/<Class>/ and run the same command again
 
-maize-train                 # notebook settings: 20 epochs, lr 1e-3, batch 64
+maize-train                 # autoencoder, notebook settings: 20 epochs, lr 1e-3, batch 64
 maize-evaluate              # results, figures and calibration.json in models/ae/eval/
+maize-train-classifier --backbone mobilenet_v2   # classifier: head then fine-tune, models/clf/
 ```
 Each command takes `--help`.
 
@@ -48,15 +53,18 @@ Retraining is manual. Each model records the `data_version` it was trained on in
 ## Web app
 
 ```
-make train eval    # train writes model.onnx, eval writes calibration.json
-make release       # copies model.onnx, calibration.json, meta.json into release/ (small; commit them)
+make train eval classifier   # model.onnx + calibration.json, classifier.onnx + classifier.json
+make release       # copies those (and meta.json) into release/ (small; commit them)
 make serve         # builds the frontend, serves http://localhost:8000
 make docker        # the same in the production container
 ```
-The model is exported to ONNX at train time and served with `onnxruntime`, so the image has no torch
-and fits Render's free 512 MB. The app returns the reconstruction error and a 0-1 severity score
-`(e - median healthy) / (p99 diseased - median healthy)`. It does not name the disease; that needs the
-stage-1 classifier. Heat maps are a developer tool (`maize-evaluate`), not shown to users; production
+Both models are exported to ONNX at train time and served with `onnxruntime`, so the image has no
+torch, TensorFlow or Keras and fits Render's free 512 MB. `/api/score` returns the predicted label,
+its confidence (`confident` is false below `min_confidence` in `classifier.json`, default 0.6), and a
+0-1 severity score `(e - median healthy) / (p99 diseased - median healthy)`. The UI shows Healthy for a
+healthy label, otherwise grades the disease mild / moderate / severe from the score. All UI text is in
+`frontend/public/i18n/{en,sw}.json`; the Kiswahili still needs a review by a native speaker and the
+advice by an extension officer. Heat maps are a developer tool (`maize-evaluate`), not shown to users; production
 monitoring is planned in [docs/observability.md](docs/observability.md).
 
 ## Dependencies, CI and deployment
@@ -83,8 +91,8 @@ Free instances sleep after 15 min idle (first request takes about a minute). Pho
 
 `train` and `evaluate` do not read photos directly. The first run resizes every image once (in parallel) and saves
 them to `<data root>/cache_128.npz`, keyed by each image's sha1. Later runs load that single file in seconds,
-and new images from `prepare` are added on demand. Delete the file if you change `preprocess.resize` or
-`IMG_SIZE`. The cache is not in git (it lives with the data).
+and new images from `prepare` are added on demand. The classifier uses its own `cache_224.npz`. Delete a cache if you
+change `preprocess.resize`, `IMG_SIZE` or `CLS_SIZE`. The cache is not in git (it lives with the data).
 
 ## Colab
 
@@ -94,16 +102,16 @@ Training and eval want the GPU. Keep everything inside one data root on Drive (t
 MyDrive/maize_data/
   raw/Healthy|MLND|MSV|MLB/...     <- your images (move cv_datasets_cleaned here) + any new drops
   manifest.csv                     <- written by prepare
-  cache_128.npz                    <- written by the first train/evaluate; reused by every later run
-MyDrive/maize_models/ae/           <- trained weights
+  cache_128.npz, cache_224.npz     <- written by the first run of each model; reused afterwards
+MyDrive/maize_models/ae/, clf/     <- trained models
 ```
 
 ```python
 from google.colab import drive; drive.mount("/content/drive")
 !git clone <repo-url> /content/repo
 %cd /content/repo
-# Colab already has torch/opencv: install only our package
-!pip install -q --no-deps -e . && pip install -q imagehash
+# Colab already has torch, keras, sklearn and opencv: install only our package
+!pip install -q --no-deps -e . && pip install -q imagehash onnx
 
 import os
 DRIVE = "/content/drive/MyDrive/maize_data"
@@ -112,7 +120,10 @@ os.environ["MAIZE_DATA_ROOT"] = DRIVE
 !maize-prepare --raw {DRIVE}/raw        # update manifest (CPU; safe to re-run after adding images)
 !maize-train --out /content/drive/MyDrive/maize_models/ae   # first run builds the cache (slow once)
 !maize-evaluate --model-dir /content/drive/MyDrive/maize_models/ae
+!maize-train-classifier --out /content/drive/MyDrive/maize_models/clf
 ```
+Then copy `model.onnx`, `calibration.json`, `meta.json` (ae/) and `classifier.onnx`, `classifier.json`
+(clf/) into `release/` and push; CI builds and deploys the new image.
 If a session dies, nothing is lost: the manifest, cache and models are on Drive.
 
 ## Differences from the notebook (on purpose)
@@ -121,6 +132,6 @@ If a session dies, nothing is lost: the manifest, cache and models are on Drive.
 - Figures are saved to disk instead of `plt.show()`.
 - Group assignment is incremental (see above) instead of one-off complete-linkage clustering.
 
-## Not built yet (tag `old-keras-scaffold` has an earlier, larger TF/Keras scaffold for reference)
-Stage-1 classifier (disease name + retake-if-unsure), leaf masking, a held-out test split. The serving
-code is deliberately framework-neutral (ONNX), so a PyTorch classifier slots in next to the autoencoder.
+## Not built yet
+Leaf masking, a held-out test split (the classifier is scored on the validation split), and the
+monitoring in docs/observability.md. Tag `old-keras-scaffold` keeps an earlier TF/Keras scaffold.

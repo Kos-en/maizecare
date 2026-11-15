@@ -5,7 +5,8 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-IMG_SIZE = 128
+IMG_SIZE = 128   # autoencoder input
+CLS_SIZE = 224   # classifier input (ImageNet backbones)
 
 
 def decode(data: bytes) -> np.ndarray | None:
@@ -14,9 +15,9 @@ def decode(data: bytes) -> np.ndarray | None:
     return None if bgr is None else cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
 
-def resize(rgb: np.ndarray) -> np.ndarray:
-    """RGB uint8 HxWx3 -> RGB uint8 128x128x3 (this is what the image cache stores)."""
-    return cv2.resize(rgb, (IMG_SIZE, IMG_SIZE))
+def resize(rgb: np.ndarray, size: int = IMG_SIZE) -> np.ndarray:
+    """RGB uint8 HxWx3 -> RGB uint8 size x size x 3 (this is what the image cache stores)."""
+    return cv2.resize(rgb, (size, size))
 
 
 def to_tensor(img: np.ndarray) -> np.ndarray:
