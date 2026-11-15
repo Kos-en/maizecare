@@ -54,9 +54,10 @@ make serve         # builds the frontend, serves http://localhost:8000
 make docker        # the same in the production container
 ```
 The model is exported to ONNX at train time and served with `onnxruntime`, so the image has no torch
-and fits Render's free 512 MB. The app returns the reconstruction error, a 0-1 severity score
-`(e - median healthy) / (p99 diseased - median healthy)` and an error heat map. It does not name the
-disease; that needs the stage-1 classifier.
+and fits Render's free 512 MB. The app returns the reconstruction error and a 0-1 severity score
+`(e - median healthy) / (p99 diseased - median healthy)`. It does not name the disease; that needs the
+stage-1 classifier. Heat maps are a developer tool (`maize-evaluate`), not shown to users; production
+monitoring is planned in [docs/observability.md](docs/observability.md).
 
 Deploy on Render (free): push to GitHub, then Render -> New -> Blueprint -> select the repo.
 Free instances sleep after 15 min idle (first request takes about a minute). Photos are never stored.
