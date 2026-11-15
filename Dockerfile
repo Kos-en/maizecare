@@ -10,7 +10,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # 2) install the [serve] dependencies from pyproject.toml, at the exact versions + hashes in uv.lock
-FROM python:3.13-slim AS deps
+FROM python:3.15-slim AS deps
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
@@ -18,7 +18,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project --extra serve
 
 # 3) runtime: only the venv, the code, the model and the static files (no uv, no Node)
-FROM python:3.13-slim
+FROM python:3.15-slim
 ENV PYTHONUNBUFFERED=1 PATH=/app/.venv/bin:$PATH PYTHONPATH=/app/src \
     MAIZE_MODEL_DIR=/app/model MAIZE_STATIC_DIR=/app/static
 WORKDIR /app
