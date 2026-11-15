@@ -26,6 +26,7 @@ EXTS = {".jpg", ".jpeg", ".png"}
 MIN_SIDE = 50
 HAMMING = 6
 VAL_FRAC = 0.15
+SAVE_EVERY = 1000  # save progress so an interrupted run resumes instead of starting over
 _POP8 = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
 
 
@@ -122,6 +123,10 @@ def classify(label: str, info, known_sha: set, idx: Index, hamming: int, val_fra
     return decide(label, int(ph, 16), int(ah, 16), idx, hamming, val_frac)
 
 
+def _append(df: pd.DataFrame, rows: list[dict]) -> pd.DataFrame:
+    return pd.concat([df, pd.DataFrame(rows, columns=COLUMNS)], ignore_index=True)
+
+
 def prepare(raw: Path, root: Path, val_frac: float = VAL_FRAC, hamming: int = HAMMING) -> pd.DataFrame:
     df = load_manifest(root)
     known_paths = set(df["path"])
@@ -137,7 +142,7 @@ def prepare(raw: Path, root: Path, val_frac: float = VAL_FRAC, hamming: int = HA
     todo = [(p, rel) for p in files if p not in loose and (rel := _rel(p, root)) not in known_paths]
 
     new_rows = []
-    for p, rel in tqdm(todo, desc="checking new images", unit="img"):
+    for i, (p, rel) in enumerate(tqdm(todo, desc="checking new images", unit="img"), 1):
         label = p.relative_to(raw).parts[0]
         info = _inspect(p)
         status, group, split = classify(label, info, known_sha, idx, hamming, val_frac)
@@ -147,9 +152,11 @@ def prepare(raw: Path, root: Path, val_frac: float = VAL_FRAC, hamming: int = HA
             idx.add(int(ph, 16), int(ah, 16), group, split, label)
         new_rows.append(dict(path=rel, label=label, sha1=sha, phash=ph, ahash=ah, group=group, split=split,
                              status=status, added_at=now))
+        if i % SAVE_EVERY == 0:
+            save_manifest(_append(df, new_rows), root)
 
     if new_rows:
-        df = pd.concat([df, pd.DataFrame(new_rows, columns=COLUMNS)], ignore_index=True)
+        df = _append(df, new_rows)
         save_manifest(df, root)
     print(f"{len(files)} files scanned, {len(new_rows)} new.")
     return df
