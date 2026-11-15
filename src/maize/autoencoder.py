@@ -1,0 +1,81 @@
+"""Convolutional autoencoder + helpers. Architecture, preprocessing and loss are exactly
+the notebook's (128x128, 4 stride-2 convs to an 8x8x32 bottleneck, MSE)."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import cv2
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, Dataset
+
+from .data import IMG_SIZE
+
+WEIGHTS = "healthy_autoencoder.pt"
+
+
+def pick_device() -> str:
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+class LeafDataset(Dataset):
+    def __init__(self, paths, img_size: int = IMG_SIZE):
+        self.paths, self.img_size = list(paths), img_size
+
+    def __len__(self):
+        return len(self.paths)
+
+    def __getitem__(self, idx):
+        img = cv2.imread(str(self.paths[idx]))
+        if img is None:
+            raise FileNotFoundError(f"Could not read {self.paths[idx]}")
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, (self.img_size, self.img_size))
+        img = img.astype(np.float32) / 255.0
+        return torch.from_numpy(img).permute(2, 0, 1)
+
+
+class ConvAutoencoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv2d(3, 32, 3, stride=2, padding=1), nn.ReLU(),     # 128 -> 64
+            nn.Conv2d(32, 64, 3, stride=2, padding=1), nn.ReLU(),    # 64 -> 32
+            nn.Conv2d(64, 128, 3, stride=2, padding=1), nn.ReLU(),   # 32 -> 16
+            nn.Conv2d(128, 32, 3, stride=2, padding=1), nn.ReLU(),   # 16 -> 8  (bottleneck)
+        )
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(32, 128, 4, stride=2, padding=1), nn.ReLU(),  # 8 -> 16
+            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1), nn.ReLU(),  # 16 -> 32
+            nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1), nn.ReLU(),   # 32 -> 64
+            nn.ConvTranspose2d(32, 3, 4, stride=2, padding=1), nn.Sigmoid(),  # 64 -> 128
+        )
+
+    def forward(self, x):
+        return self.decoder(self.encoder(x))
+
+
+@torch.no_grad()
+def reconstruction_errors(model, paths, device: str, batch_size: int = 64) -> np.ndarray:
+    """Per-image mean squared reconstruction error, in the order of `paths`."""
+    model.eval()
+    loader = DataLoader(LeafDataset(paths), batch_size=batch_size, shuffle=False)
+    errors = []
+    for batch in loader:
+        batch = batch.to(device)
+        errors.extend(((model(batch) - batch) ** 2).mean(dim=[1, 2, 3]).cpu().numpy().tolist())
+    return np.array(errors)
+
+
+def save_model(model, out_dir: Path, meta: dict) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), out_dir / WEIGHTS)
+    (out_dir / "meta.json").write_text(json.dumps(meta, indent=2, default=str))
+
+
+def load_model(model_dir: Path, device: str) -> ConvAutoencoder:
+    model = ConvAutoencoder().to(device)
+    model.load_state_dict(torch.load(Path(model_dir) / WEIGHTS, map_location=device))
+    return model.eval()

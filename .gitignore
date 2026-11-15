@@ -5,18 +5,8 @@ __pycache__/
 *.egg-info/
 .venv/
 .env
-
-# data and training outputs live on Drive / locally, never in git
-data/*
-!data/.gitkeep
-!data/manifest.csv
-runs/*
-!runs/.gitkeep
-
-# the release artifacts for the Render image ARE committed (small TFLite files)
-!artifacts/release-lite/
-
-frontend/node_modules/
-frontend/dist/
-static/
 .DS_Store
+
+# data and trained weights live on Drive / locally, not in git
+data/
+models/

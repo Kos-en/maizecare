@@ -4,23 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "maize"
-version = "0.1.0"
-description = "Two-stage maize leaf disease classifier + autoencoder severity score"
+version = "0.2.0"
+description = "Maize leaf severity: healthy-only autoencoder + incremental data cleaning"
 requires-python = ">=3.10"
-# Core deps only: this is all the Render/TFLite image needs besides the [serve] extra.
 dependencies = [
-  "numpy",
-  "opencv-python-headless",
-  "pyyaml",
+  "numpy", "pandas", "pillow", "imagehash", "opencv-python-headless",
+  "scipy", "matplotlib", "tqdm",
 ]
 
 [project.optional-dependencies]
-serve = ["fastapi", "uvicorn", "python-multipart", "ai-edge-litert"]
-train = [
-  "tensorflow>=2.16", "pandas", "scikit-learn>=1.1", "scipy", "imagehash",
-  "pillow", "matplotlib", "tqdm",
-]
-dev = ["pytest", "httpx"]
+train = ["torch"]          # on Colab torch is preinstalled: skip this extra there
+dev = ["pytest"]
+
+[project.scripts]
+maize-prepare = "maize.prepare:main"
+maize-train = "maize.train:main"
+maize-evaluate = "maize.evaluate:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
