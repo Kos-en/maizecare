@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 from pathlib import Path
 
 import matplotlib
@@ -20,7 +19,8 @@ from scipy.stats import spearmanr
 from tqdm import tqdm
 
 from .autoencoder import load_model, pick_device, reconstruction_errors
-from .data import HEALTHY, data_root, load_manifest, select
+from .cache import load_images
+from .data import HEALTHY, abs_paths, data_root, load_manifest, select
 from .preprocess import decode, to_input
 from .severity import extract_quick_features, formula_severity
 
@@ -57,8 +57,7 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=42)
     a = ap.parse_args(argv)
 
-    rng = random.Random(a.seed)
-    sample = lambda paths, n: rng.sample(paths, min(n, len(paths)))
+    sample = lambda rows, n: rows.sample(min(n, len(rows)), random_state=a.seed)
     device = pick_device()
     root = data_root(a.data_root)
     df = load_manifest(root)
@@ -67,12 +66,13 @@ def main(argv=None):
     model = load_model(a.model_dir, device)
     results: dict = {}
 
-    train_paths = select(df, root, label=HEALTHY, split="train")
-    val_paths = select(df, root, label=HEALTHY, split="val")
+    errors = lambda rows: reconstruction_errors(model, load_images(rows, root), device)
+    train_rows = select(df, label=HEALTHY, split="train")
+    val_rows = select(df, label=HEALTHY, split="val")
     diseases = sorted(set(df.loc[df["status"] == "ok", "label"]) - {HEALTHY})
 
     # 5. false-positive check on held-out healthy
-    train_err, val_err = reconstruction_errors(model, train_paths, device), reconstruction_errors(model, val_paths, device)
+    train_err, val_err = errors(train_rows), errors(val_rows)
     threshold = float(np.percentile(train_err, 95))
     results["healthy"] = {
         "train_error_mean": float(train_err.mean()), "train_error_std": float(train_err.std()),
@@ -83,9 +83,9 @@ def main(argv=None):
     print("Healthy:", json.dumps(results["healthy"], indent=2))
 
     # 6. error by class
-    class_paths = {HEALTHY: sample(val_paths, a.sample_n)}
-    class_paths.update({d: sample(select(df, root, label=d), a.sample_n) for d in diseases})
-    class_errors = {c: reconstruction_errors(model, p, device) for c, p in class_paths.items() if p}
+    class_rows = {HEALTHY: sample(val_rows, a.sample_n)}
+    class_rows.update({d: sample(select(df, label=d), a.sample_n) for d in diseases})
+    class_errors = {c: errors(r) for c, r in class_rows.items() if len(r)}
     results["error_by_class"] = {c: {"mean": float(e.mean()), "median": float(np.median(e)), "n": len(e)}
                                  for c, e in class_errors.items()}
     for c, s in results["error_by_class"].items():
@@ -117,19 +117,21 @@ def main(argv=None):
     # 7. correlation with formula severity
     results["formula_correlation"] = {}
     for d in diseases:
-        paths, scores = [], []
-        for p in tqdm(sample(select(df, root, label=d), a.corr_n), desc=f"{d} formula features"):
-            try:
+        rows = sample(select(df, label=d), a.corr_n)
+        keep, scores = [], []
+        for i, p in enumerate(tqdm(abs_paths(rows, root), desc=f"{d} formula features")):
+            try:  # the formula needs the full-size photo; skip any that cannot be read
                 scores.append(formula_severity(extract_quick_features(p)))
-                paths.append(p)
+                keep.append(i)
             except Exception:
                 pass
-        if len(paths) < 3:
+        if len(keep) < 3:
             continue
-        errs = reconstruction_errors(model, paths, device)
+        rows = rows.iloc[keep]
+        errs = errors(rows)
         rho, pval = spearmanr(errs, scores)
-        results["formula_correlation"][d] = {"spearman_rho": float(rho), "p_value": float(pval), "n": len(paths)}
-        print(f"{d}: Spearman rho={rho:.3f}, p={pval:.4f}  (n={len(paths)})")
+        results["formula_correlation"][d] = {"spearman_rho": float(rho), "p_value": float(pval), "n": len(rows)}
+        print(f"{d}: Spearman rho={rho:.3f}, p={pval:.4f}  (n={len(rows)})")
         plt.figure(figsize=(6, 6))
         plt.scatter(scores, errs, alpha=0.4, s=15)
         plt.xlabel("Formula-Based Severity Score"), plt.ylabel("Autoencoder Reconstruction Error")
@@ -138,9 +140,10 @@ def main(argv=None):
         plt.close()
 
     # 8. heat maps: one random example per class
-    for c, paths in [(HEALTHY, val_paths)] + [(d, select(df, root, label=d)) for d in diseases]:
-        if paths:
-            save_reconstruction_figure(model, rng.choice(paths), c, out / f"heatmap_{c}.png", device)
+    for c, rows in [(HEALTHY, val_rows)] + [(d, select(df, label=d)) for d in diseases]:
+        if len(rows):
+            path = abs_paths(sample(rows, 1), root)[0]
+            save_reconstruction_figure(model, path, c, out / f"heatmap_{c}.png", device)
 
     (out / "metrics.json").write_text(json.dumps(results, indent=2))
     print(f"\nWrote results to {out}")

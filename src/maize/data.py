@@ -29,11 +29,15 @@ def save_manifest(df: pd.DataFrame, root: Path) -> None:
     df[COLUMNS].to_csv(root / "manifest.csv", index=False)
 
 
-def select(df: pd.DataFrame, root: Path, label: str | None = None, split: str | None = None) -> list[str]:
-    """Absolute paths of accepted images, optionally filtered."""
+def select(df: pd.DataFrame, label: str | None = None, split: str | None = None) -> pd.DataFrame:
+    """Manifest rows of accepted images, optionally filtered by class and split."""
     m = df["status"] == "ok"
     if label is not None:
         m &= df["label"] == label
     if split is not None:
         m &= df["split"] == split
-    return [str(root / p) for p in df.loc[m, "path"]]
+    return df[m]
+
+
+def abs_paths(rows: pd.DataFrame, root: Path) -> list[str]:
+    return [str(root / p) for p in rows["path"]]

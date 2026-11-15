@@ -60,14 +60,22 @@ disease; that needs the stage-1 classifier.
 Deploy on Render (free): push to GitHub, then Render -> New -> Blueprint -> select the repo.
 Free instances sleep after 15 min idle (first request takes about a minute). Photos are never stored.
 
+## Image cache
+
+`train` and `evaluate` do not read photos directly. The first run resizes every image once (in parallel) and saves
+them to `<data root>/cache_128.npz`, keyed by each image's sha1. Later runs load that single file in seconds,
+and new images from `prepare` are added on demand. Delete the file if you change `preprocess.resize` or
+`IMG_SIZE`. The cache is not in git (it lives with the data).
+
 ## Colab
 
-Training and eval want the GPU. Keep images inside the data root, because the manifest stores relative paths:
+Training and eval want the GPU. Keep everything inside one data root on Drive (the manifest stores relative paths):
 
 ```
 MyDrive/maize_data/
   raw/Healthy|MLND|MSV|MLB/...     <- your images (move cv_datasets_cleaned here) + any new drops
-  manifest.csv                     <- written by prepare, persists across sessions
+  manifest.csv                     <- written by prepare
+  cache_128.npz                    <- written by the first train/evaluate; reused by every later run
 MyDrive/maize_models/ae/           <- trained weights
 ```
 
@@ -80,17 +88,13 @@ from google.colab import drive; drive.mount("/content/drive")
 
 import os
 DRIVE = "/content/drive/MyDrive/maize_data"
-
-# 1) update the manifest on Drive (CPU, safe to re-run after adding images)
 os.environ["MAIZE_DATA_ROOT"] = DRIVE
-!python -m maize.prepare --raw {DRIVE}/raw
 
-# 2) copy images to fast local disk for training (Drive reads are slow); manifest paths still resolve
-!mkdir -p /content/data && cp -r {DRIVE}/raw {DRIVE}/manifest.csv /content/data/
-os.environ["MAIZE_DATA_ROOT"] = "/content/data"
-!python -m maize.train --out /content/drive/MyDrive/maize_models/ae
+!python -m maize.prepare --raw {DRIVE}/raw        # update manifest (CPU; safe to re-run after adding images)
+!python -m maize.train --out /content/drive/MyDrive/maize_models/ae   # first run builds the cache (slow once)
 !python -m maize.evaluate --model-dir /content/drive/MyDrive/maize_models/ae
 ```
+If a session dies, nothing is lost: the manifest, cache and models are on Drive.
 
 ## Differences from the notebook (on purpose)
 - Per-image formula-correlation loop now computes all reconstruction errors in one batch (same numbers, much faster).
