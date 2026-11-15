@@ -1,30 +1,33 @@
-// Leaf photo -> POST /api/score (src/maize/serve.py) -> damage level and what to do.
-import { BANDS, Band, DISEASES, DiseaseKey, bandFor } from "./advice.js";
+// Leaf photo -> POST /api/score (src/maize/serve.py) -> disease, severity and what to do.
+import { BAND_COLOR, BANDS, DISEASE_COLOR, DISEASES, Disease, HEALTHY, bandFor } from "./advice.js";
+import { Lang, get, initialLang, loadLang, t } from "./i18n.js";
 
 interface ScoreResult {
-  score: number; // 0 = like a healthy leaf, 1 = as far from healthy as the worst diseased leaves
-  within_healthy_range: boolean;
+  label: string; // "Healthy" or a Disease
+  confidence: number;
+  confident: boolean;
+  score: number; // 0 = like a healthy leaf, 1 = as damaged as the worst diseased leaves
   model_version: string | null;
 }
 
-type View = "intro" | "loading" | "error" | "result";
+type View = "intro" | "loading" | "error" | "unsure" | "result";
 
-const MAX_SIDE = 1024; // shrink on the phone: ~150 KB to upload instead of several MB (the model uses 128 px)
+const MAX_SIDE = 1024; // shrink on the phone: ~150 KB to upload instead of several MB
 const TIMEOUT_MS = 90_000; // a sleeping free server can take about a minute to wake
 const WAKE_HINT_MS = 5000;
-const BAND_ORDER: Band[] = ["healthy", "mild", "moderate", "severe"];
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 const frame = $("frame");
 const photo = $<HTMLImageElement>("photo");
-const shutter = $("shutter");
 const ring = document.getElementById("ring") as unknown as SVGCircleElement;
 const views: Record<View, HTMLElement> = {
-  intro: $("v-intro"), loading: $("v-loading"), error: $("v-error"), result: $("v-result"),
+  intro: $("v-intro"), loading: $("v-loading"), error: $("v-error"), unsure: $("v-unsure"), result: $("v-result"),
 };
 
 let upload: Blob | null = null;
-let shareText = "";
+let last: ScoreResult | null = null;
+let errorKey = "error.generic";
+let guideDisease: Disease = "MLND";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = "", className = ""): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -43,8 +46,9 @@ function progress(step: number): void {
   });
 }
 
-function fail(message: string): void {
-  $("error-text").textContent = message;
+function fail(key: string): void {
+  errorKey = key;
+  $("error-text").textContent = t(key);
   show("error");
 }
 
@@ -66,19 +70,13 @@ async function score(blob: Blob): Promise<ScoreResult> {
   const body = new FormData();
   body.append("file", blob, "leaf.jpg");
   const res = await fetch("/api/score", { method: "POST", body, signal: AbortSignal.timeout(TIMEOUT_MS) });
-  if (!res.ok) {
-    const detail = (await res.json().catch(() => ({}))).detail;
-    throw new Error(detail || `Server error (${res.status}). Please try again.`);
-  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as ScoreResult;
 }
 
-function explain(err: unknown): string {
-  if (err instanceof DOMException && err.name === "TimeoutError") {
-    return "The server took too long to answer. Check your connection and try again.";
-  }
-  if (err instanceof TypeError) return "Could not reach the server. Check your internet and try again.";
-  return err instanceof Error ? err.message : "Something went wrong. Please try again.";
+function errorKeyFor(err: unknown): string {
+  if (err instanceof DOMException && err.name === "TimeoutError") return "error.timeout";
+  return err instanceof TypeError ? "error.offline" : "error.generic";
 }
 
 async function check(file: File): Promise<void> {
@@ -87,13 +85,13 @@ async function check(file: File): Promise<void> {
   try {
     upload = await shrink(file);
   } catch {
-    fail("Could not open that photo. Please use a JPEG or PNG image.");
+    fail("error.open");
     return;
   }
   URL.revokeObjectURL(photo.src);
   photo.src = URL.createObjectURL(upload);
   photo.hidden = false;
-  shutter.hidden = true;
+  $("shutter").hidden = true;
   frame.classList.add("has-photo");
   await analyse(upload);
 }
@@ -104,11 +102,11 @@ async function analyse(blob: Blob): Promise<void> {
   frame.classList.add("scanning");
   const wake = setTimeout(() => ($("wake").hidden = false), WAKE_HINT_MS);
   try {
-    const result = await score(blob);
+    last = await score(blob);
     progress(2);
-    render(result);
+    render(last, true);
   } catch (err) {
-    fail(explain(err));
+    fail(errorKeyFor(err));
   } finally {
     clearTimeout(wake);
     $("wake").hidden = true;
@@ -116,25 +114,34 @@ async function analyse(blob: Blob): Promise<void> {
   }
 }
 
-function render(r: ScoreResult): void {
-  const band = bandFor(r.score, r.within_healthy_range);
-  const b = BANDS[band];
-  const pct = Math.round(r.score * 100);
+function render(r: ScoreResult, animate: boolean): void {
+  if (!r.confident) {
+    show("unsure");
+    return;
+  }
+  const healthy = r.label === HEALTHY;
+  const band = bandFor(r.label, r.score);
+  const pct = healthy ? 0 : Math.round(r.score * 100);
+  const name = healthy ? t("bands.healthy.label") : t(`diseases.${r.label}.name`);
 
-  views.result.style.setProperty("--accent", b.color);
-  $("chip").textContent = b.label;
-  $("headline").textContent = b.title;
-  $("meaning").textContent = b.meaning;
-  $("action").textContent = b.action;
-  $("steps").replaceChildren(...b.steps.map((s) => el("li", s)));
-  $("scale").replaceChildren(...BAND_ORDER.map((key) => {
-    const seg = el("div", BANDS[key].label, key === band ? "seg on" : "seg");
-    seg.style.setProperty("--c", BANDS[key].color);
+  views.result.style.setProperty("--accent", BAND_COLOR[band]);
+  $("chip").textContent = t(`bands.${band}.label`);
+  $("headline").textContent = healthy ? t("result.healthy_title") : t("result.detected", { disease: name });
+  $("confidence").textContent = t("result.confidence", { pct: Math.round(r.confidence * 100) });
+  $("meaning").textContent = t(`bands.${band}.meaning`);
+  $("action").textContent = t(`bands.${band}.action`);
+  $("steps").replaceChildren(...get<string[]>(`bands.${band}.steps`).map((s) => el("li", s)));
+  $("scale").replaceChildren(...BANDS.map((key) => {
+    const seg = el("div", t(`bands.${key}.label`), key === band ? "seg on" : "seg");
+    seg.style.setProperty("--c", BAND_COLOR[key]);
     return seg;
   }));
-  $("model").textContent = `Model ${r.model_version ?? "unknown"} · Advice under review with an extension officer`;
-  shareText = `Mahindi maize leaf analysis: ${b.label} damage (${pct}%). Recommended action: ${b.action}.`;
+  $("learn-title").textContent = healthy ? t("result.learn_healthy") : t("result.learn", { disease: name });
+  $("learn-hint").textContent = healthy ? t("result.learn_healthy_hint") : t("result.learn_hint");
+  $("model").textContent = t("result.model", { version: r.model_version ?? "-" });
+  if (!healthy) selectDisease(r.label as Disease);
   show("result");
+  if (!animate) return;
   animateRing(pct);
   if (matchMedia("(max-width: 860px)").matches) views.result.scrollIntoView({ behavior: "smooth" });
 }
@@ -144,9 +151,9 @@ function animateRing(pct: number): void {
   requestAnimationFrame(() => requestAnimationFrame(() => (ring.style.strokeDashoffset = String(100 - pct))));
   const start = performance.now();
   const tick = (now: number): void => {
-    const t = Math.min(1, (now - start) / 1100);
-    $("pct").textContent = String(Math.round(pct * (1 - (1 - t) ** 3)));
-    if (t < 1) requestAnimationFrame(tick);
+    const p = Math.min(1, (now - start) / 1100);
+    $("pct").textContent = String(Math.round(pct * (1 - (1 - p) ** 3)));
+    if (p < 1) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
 }
@@ -157,57 +164,72 @@ function fact(term: string, body: HTMLElement, className = ""): HTMLDivElement {
   return row;
 }
 
-function selectDisease(key: DiseaseKey): void {
+function selectDisease(key: Disease): void {
+  guideDisease = key;
   $("tabs").querySelectorAll<HTMLButtonElement>("button").forEach((tab) => {
     tab.setAttribute("aria-pressed", String(tab.dataset.key === key));
   });
-  const panel = $("disease");
-  const d = DISEASES[key];
-  const steps = el("dd");
-  const list = el("ul");
-  list.append(...d.steps.map((s) => el("li", s)));
-  steps.append(list);
-  const source = el("dd");
-  const link = el("a", d.source.name);
-  Object.assign(link, { href: d.source.url, target: "_blank", rel: "noopener noreferrer" });
-  source.append(link);
+  const steps = el("ul");
+  steps.append(...get<string[]>(`diseases.${key}.steps`).map((s) => el("li", s)));
+  const what = el("dd");
+  what.append(steps);
   const facts = el("dl", "", "facts");
   facts.append(
-    fact("Signs to look for", el("dd", d.signs)),
-    fact("Cause", el("dd", d.cause)),
-    fact("What to do", steps, "wide"),
-    fact("Yield risk", el("dd", d.risk)),
-    fact("Source", source),
+    fact(t("guide.signs"), el("dd", t(`diseases.${key}.signs`))),
+    fact(t("guide.cause"), el("dd", t(`diseases.${key}.cause`))),
+    fact(t("guide.what"), what, "wide"),
+    fact(t("guide.risk"), el("dd", t(`diseases.${key}.risk`)), "wide"),
   );
-  panel.style.setProperty("--accent", d.color);
-  panel.replaceChildren(el("h3", d.name), el("p", d.kind, "kind"), facts);
+  const panel = $("disease");
+  panel.style.setProperty("--accent", DISEASE_COLOR[key]);
+  panel.replaceChildren(el("h3", t(`diseases.${key}.name`)), el("p", t(`diseases.${key}.kind`), "kind"), facts);
 }
 
 function buildTabs(): void {
-  const keys = Object.keys(DISEASES) as DiseaseKey[];
-  $("tabs").replaceChildren(...keys.map((key) => {
-    const tab = el("button", DISEASES[key].short, "tab");
+  $("tabs").replaceChildren(...DISEASES.map((key) => {
+    const tab = el("button", t(`diseases.${key}.short`), "tab");
     tab.type = "button";
     tab.dataset.key = key;
-    tab.style.setProperty("--tab", DISEASES[key].color);
+    tab.style.setProperty("--tab", DISEASE_COLOR[key]);
     tab.addEventListener("click", () => selectDisease(key));
     return tab;
   }));
+  selectDisease(guideDisease);
+}
+
+async function setLang(lang: Lang): Promise<void> {
+  await loadLang(lang);
+  document.querySelectorAll<HTMLButtonElement>("[data-lang]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.lang === lang));
+  });
+  photo.alt = t("scan.take");
+  $("error-text").textContent = t(errorKey);
+  buildTabs();
+  if (last) render(last, false);
 }
 
 async function share(): Promise<void> {
+  if (!last) return;
+  const band = bandFor(last.label, last.score);
+  const text = t("result.share_text", {
+    result: last.label === HEALTHY ? t("result.healthy_title") : t(`diseases.${last.label}.name`),
+    band: t(`bands.${band}.label`),
+    pct: last.label === HEALTHY ? 0 : Math.round(last.score * 100),
+    action: t(`bands.${band}.action`),
+  });
   if (navigator.share) {
-    await navigator.share({ title: "Mahindi", text: shareText }).catch(() => undefined);
+    await navigator.share({ title: t("app.name"), text }).catch(() => undefined);
     return;
   }
-  await navigator.clipboard.writeText(shareText);
-  $("share").textContent = "Copied";
-  setTimeout(() => ($("share").textContent = "Share result"), 1500);
+  await navigator.clipboard.writeText(text);
+  $("share").textContent = t("result.copied");
+  setTimeout(() => ($("share").textContent = t("result.share")), 1500);
 }
 
 function reset(): void {
+  last = null;
   photo.hidden = true;
-  shutter.hidden = false;
+  $("shutter").hidden = false;
   frame.classList.remove("has-photo");
   show("intro");
   $("analyse").scrollIntoView({ behavior: "smooth" });
@@ -232,10 +254,12 @@ frame.addEventListener("drop", (e) => {
   const file = e.dataTransfer?.files[0];
   if (file) void check(file);
 });
+document.querySelectorAll<HTMLButtonElement>("[data-lang]").forEach((b) => {
+  b.addEventListener("click", () => void setLang(b.dataset.lang as Lang));
+});
 $("retry").addEventListener("click", () => void (upload ? analyse(upload) : reset()));
 $("share").addEventListener("click", () => void share());
 $("again").addEventListener("click", reset);
 
-buildTabs();
-selectDisease("mln");
 show("intro");
+void setLang(initialLang());

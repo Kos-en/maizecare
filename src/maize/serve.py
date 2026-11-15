@@ -1,8 +1,9 @@
-"""FastAPI app: scores a leaf photo with the ONNX model and serves the built frontend.
+"""FastAPI app: classifies a leaf photo, grades its severity, and serves the built frontend.
 
     uvicorn maize.serve:app --port 8000
 
-GET /health, POST /api/score (image -> error, 0-1 score), and / for the frontend.
+GET /health, POST /api/score (image -> disease label + confidence, 0-1 severity), / for the frontend.
+Stage 1 is the Keras classifier (classifier.onnx), stage 2 the healthy-only autoencoder (model.onnx).
 Photos are processed in memory, never stored. With no model files the app still starts
 and /api/score returns 503, so a first deploy works. Heat maps are for developers only
 (maize-evaluate); see docs/observability.md.
@@ -21,31 +22,47 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from .preprocess import decode, to_input
+from .preprocess import CLS_SIZE, decode, resize, to_input
 
 log = logging.getLogger("maize.serve")
 MAX_UPLOAD = 10 * 1024 * 1024
+MODEL_FILES = ("classifier.onnx", "classifier.json", "model.onnx", "calibration.json")
+
+Run = Callable[[np.ndarray], np.ndarray]
+
+
+def onnx_runner(path: Path) -> Run:
+    import onnxruntime as ort
+    sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+    name = sess.get_inputs()[0].name
+    return lambda x: sess.run(None, {name: x})[0]
 
 
 class Scorer:
-    """run(x) maps a (1,3,128,128) float32 batch to its reconstruction (same shape)."""
+    """classify: (1,224,224,3) RGB 0-255 -> class probabilities.
+    reconstruct: (1,3,128,128) in [0,1] -> its reconstruction by the healthy-only autoencoder."""
 
-    def __init__(self, run: Callable[[np.ndarray], np.ndarray], calibration: dict):
-        self.run, self.cal = run, calibration
+    def __init__(self, classify: Run, reconstruct: Run, classes: dict, calibration: dict):
+        self.classify, self.reconstruct = classify, reconstruct
+        self.labels, self.min_conf = classes["labels"], classes["min_confidence"]
+        self.cal = calibration
 
     @classmethod
-    def from_dir(cls, model_dir: Path) -> "Scorer":
-        import onnxruntime as ort
-        sess = ort.InferenceSession(str(model_dir / "model.onnx"), providers=["CPUExecutionProvider"])
-        name = sess.get_inputs()[0].name
-        cal = json.loads((model_dir / "calibration.json").read_text())
-        return cls(lambda x: sess.run(None, {name: x})[0], cal)
+    def from_dir(cls, d: Path) -> "Scorer":
+        return cls(onnx_runner(d / "classifier.onnx"), onnx_runner(d / "model.onnx"),
+                   json.loads((d / "classifier.json").read_text()), json.loads((d / "calibration.json").read_text()))
 
     def score(self, rgb: np.ndarray) -> dict:
+        probs = self.classify(resize(rgb, CLS_SIZE)[None].astype(np.float32))[0]
+        top = int(probs.argmax())
         x = to_input(rgb)[None]
-        e = float(((x - self.run(x)) ** 2).mean())
+        e = float(((x - self.reconstruct(x)) ** 2).mean())
         med, p99 = self.cal["e_healthy_median"], self.cal["e_disease_p99"]
         return {
+            "label": self.labels[top],
+            "confidence": float(probs[top]),
+            "confident": bool(probs[top] >= self.min_conf),
+            "probabilities": {lab: round(float(p), 4) for lab, p in zip(self.labels, probs)},
             "error": e,
             "score": float(min(1.0, max(0.0, (e - med) / (p99 - med)))),
             "within_healthy_range": bool(e <= self.cal["e_healthy_p95"]),
@@ -55,8 +72,9 @@ class Scorer:
 
 def load_scorer() -> Scorer | None:
     d = Path(os.environ.get("MAIZE_MODEL_DIR", "model"))
-    if not (d / "model.onnx").exists() or not (d / "calibration.json").exists():
-        log.warning("No model in %s: /api/score will return 503", d)
+    missing = [f for f in MODEL_FILES if not (d / f).exists()]
+    if missing:
+        log.warning("Missing %s in %s: /api/score will return 503", missing, d)
         return None
     return Scorer.from_dir(d)
 

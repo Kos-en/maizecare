@@ -1,7 +1,7 @@
 {
-  "name": "Mahindi · Maize leaf analysis",
-  "short_name": "Mahindi",
-  "description": "Photograph a maize leaf to see how damaged it is and what to do next.",
+  "name": "MaizeCare",
+  "short_name": "MaizeCare",
+  "description": "Identify maize diseases from a photo, see how severe they are, and get clear next steps.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0c0f08",

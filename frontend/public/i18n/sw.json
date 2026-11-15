@@ -1,0 +1,188 @@
+{
+  "app": {
+    "name": "MaizeCare",
+    "title": "MaizeCare · Kutambua magonjwa ya mahindi",
+    "badge": "Mfano wa utafiti"
+  },
+  "nav": {
+    "analyse": "Chunguza",
+    "guide": "Mwongozo wa magonjwa",
+    "about": "Kuhusu"
+  },
+  "hero": {
+    "eyebrow": "Msaidizi wa akili bandia kwa wakulima wa mahindi",
+    "title_1": "Gundua magonjwa ya mahindi mapema.",
+    "title_2": "Linda mavuno yako.",
+    "lede": "Piga picha ya jani la mahindi. Tutatambua ugonjwa hatari wa mahindi (MLN), virusi vya michirizi (MSV) au ukungu wa majani, tukuonyeshe ukali wake, na kukueleza hatua za kuchukua."
+  },
+  "trust": {
+    "diseases": "magonjwa yanayotambuliwa",
+    "levels": "viwango vya ukali",
+    "photos": "picha zinazohifadhiwa",
+    "languages": "Kiingereza na Kiswahili"
+  },
+  "scan": {
+    "title": "Uchunguzi mpya",
+    "formats": "JPEG, PNG au HEIC",
+    "take": "Piga picha",
+    "drop": "au iburute hapa",
+    "camera": "Tumia kamera",
+    "upload": "Pakia picha",
+    "tip_one": "Jani moja kwa kila picha",
+    "tip_light": "Mwanga wa mchana, bila flash",
+    "tip_frame": "Jani lijaze picha"
+  },
+  "intro": {
+    "title": "Matokeo yako yataonekana hapa",
+    "step_1": "Piga picha ya jani moja la mahindi",
+    "step_2": "Tunatambua ugonjwa na kupima uharibifu",
+    "step_3": "Unapata hatua wazi za kulinda mazao yako"
+  },
+  "loading": {
+    "title": "Tunachunguza jani lako",
+    "prepare": "Kuandaa picha",
+    "identify": "Kutambua ugonjwa",
+    "grade": "Kupima uharibifu",
+    "wake": "Seva inaanza. Uchunguzi wa kwanza wa siku unaweza kuchukua hadi dakika moja."
+  },
+  "error": {
+    "title": "Hatukuweza kuchunguza picha hiyo",
+    "retry": "Jaribu tena",
+    "open": "Imeshindikana kufungua picha hiyo. Tafadhali tumia picha ya JPEG au PNG.",
+    "timeout": "Seva imechukua muda mrefu kujibu. Angalia mtandao wako na ujaribu tena.",
+    "offline": "Imeshindikana kufikia seva. Angalia intaneti yako na ujaribu tena.",
+    "generic": "Kuna tatizo. Tafadhali jaribu tena."
+  },
+  "unsure": {
+    "title": "Hatuna uhakika na picha hii",
+    "body": "Huenda jani halionekani vizuri, liko mbali au limefichika kwa sehemu. Piga picha mpya ya jani moja kwenye mwanga wa mchana ili lijaze picha.",
+    "retake": "Piga picha mpya"
+  },
+  "result": {
+    "damage": "uharibifu",
+    "confidence": "Uhakika {pct}%",
+    "healthy_title": "Jani lenye afya",
+    "detected": "{disease} imegunduliwa",
+    "steps": "Hatua zinazopendekezwa",
+    "learn": "Jifunze kuhusu {disease}",
+    "learn_hint": "Dalili, chanzo na jinsi ya kuzuia kuenea",
+    "learn_healthy": "Fahamu dalili za hatari",
+    "learn_healthy_hint": "Ona jinsi magonjwa makuu ya mahindi yanavyoonekana",
+    "share": "Shiriki matokeo",
+    "copied": "Imenakiliwa",
+    "again": "Chunguza jani jingine",
+    "model": "Modeli {version} · Ushauri unakaguliwa na afisa ugani wa kilimo",
+    "share_text": "MaizeCare: {result}, {band} (uharibifu {pct}%). Hatua inayopendekezwa: {action}."
+  },
+  "bands": {
+    "healthy": {
+      "label": "Afya njema",
+      "action": "Fuatilia",
+      "meaning": "Hakuna dalili za ugonjwa. Jani hili linaonekana kama jani la mahindi lenye afya.",
+      "steps": [
+        "Endelea kukagua mimea michache shambani kila wiki.",
+        "Dhibiti magugu ya nyasi. Huhifadhi wadudu wanaoeneza virusi vya mahindi."
+      ]
+    },
+    "mild": {
+      "label": "Kidogo",
+      "action": "Fuatilia kwa makini",
+      "meaning": "Hatua ya mwanzo: sehemu ndogo tu za jani zimeathirika.",
+      "steps": [
+        "Weka alama kwenye mmea huu na uukague tena baada ya siku 3 hadi 5.",
+        "Kagua mimea inayouzunguka kuona kama ina dalili hizo hizo.",
+        "Fuata hatua za ugonjwa hapa chini ili kuzuia kuenea."
+      ]
+    },
+    "moderate": {
+      "label": "Wastani",
+      "action": "Chukua hatua sasa",
+      "meaning": "Sehemu kubwa ya jani hili imeharibika.",
+      "steps": [
+        "Fuata hatua za ugonjwa hapa chini leo.",
+        "Muulize afisa ugani athibitishe kabla ya kununua dawa yoyote.",
+        "Kagua mimea jirani kuona kama ina dalili hizo hizo."
+      ]
+    },
+    "severe": {
+      "label": "Kali",
+      "action": "Ng'oa mmea",
+      "meaning": "Sehemu kubwa ya jani imeharibika. Mmea huu unaweza kueneza ugonjwa shamba zima.",
+      "steps": [
+        "Ng'oa mmea na uuharibu mbali na shamba (uzike au uuchome).",
+        "Usiache mimea au majani yenye ugonjwa shambani.",
+        "Osha mikono na vifaa vyako baadaye.",
+        "Mjulishe afisa ugani, hasa kama mimea mingi inaonekana hivi."
+      ]
+    }
+  },
+  "diseases": {
+    "MLND": {
+      "short": "MLN",
+      "name": "Ugonjwa hatari wa mahindi (MLN)",
+      "kind": "Virusi · huenezwa na vithiripi, vidukari na mbegu",
+      "signs": "Madoa na michirizi midogo ya njano kuanzia chini ya majani machanga, inayoungana na kuwa mabaka, kisha majani hukauka kuanzia pembeni. Majani machanga kabisa yanaweza kufa na magunzi hubaki madogo.",
+      "cause": "Virusi viwili kwa pamoja, vinavyobebwa na vithiripi na vidukari, na kupitia mbegu, vifaa na mabaki ya mazao yaliyoambukizwa.",
+      "steps": [
+        "Kagua shamba mara kwa mara na ung'oe mimea iliyoambukizwa mara moja.",
+        "Panda mbegu zilizothibitishwa za aina zinazostahimili MLN.",
+        "Dhibiti magugu ya nyasi, na usichanganye mahindi na kabichi, sukuma wiki au vitunguu.",
+        "Mbegu zilizotiwa dawa ya kuua wadudu hulinda mimea michanga. Uliza muuzaji wa pembejeo.",
+        "Acha shamba bila mahindi kwa angalau miezi 2, na upande maharagwe au mikunde mingine kwa mzunguko.",
+        "Safisha vifaa baada ya kufanya kazi kwenye shamba lililoambukizwa."
+      ],
+      "risk": "Unaweza kuharibu zao lote."
+    },
+    "MSV": {
+      "short": "MSV",
+      "name": "Virusi vya michirizi ya mahindi (MSV)",
+      "kind": "Virusi · huenezwa na panzi wadogo (leafhoppers)",
+      "signs": "Michirizi myembamba, isiyokatika, ya rangi ya njano hafifu kando ya mishipa ya jani, kuanzia kwenye majani machanga. Mimea iliyoambukizwa ikiwa michanga hudumaa.",
+      "cause": "Virusi vinavyobebwa na panzi wadogo. Haviambukizwi kupitia mbegu.",
+      "steps": [
+        "Panda aina inayostahimili michirizi. Muulize muuzaji wa pembejeo ni aina gani zinafaa eneo lako.",
+        "Panda mapema msimu, wakati mmoja na majirani zako.",
+        "Ng'oa mapema mimea michanga iliyoambukizwa.",
+        "Dhibiti magugu ya nyasi kuzunguka shamba."
+      ],
+      "risk": "Hasara ya hadi 90% kwa aina zisizostahimili."
+    },
+    "MLB": {
+      "short": "Ukungu wa majani",
+      "name": "Ukungu wa majani ya mahindi (NLB)",
+      "kind": "Kuvu · huenezwa na upepo na mvua",
+      "signs": "Madoa marefu yenye umbo la sigara, rangi ya kijivu-kijani hadi kahawia, kuanzia majani ya chini na kupanda juu. Huzidi wakati wa baridi na unyevu.",
+      "cause": "Kuvu inayoishi kwenye mabaki ya zamani ya mahindi shambani.",
+      "steps": [
+        "Panda aina inayostahimili ugonjwa huu. Hii ndiyo njia ya uhakika zaidi.",
+        "Badilisha mahindi na zao jingine kwa mzunguko.",
+        "Ondoa au zika mabaki ya mahindi baada ya mavuno.",
+        "Tumia dawa ya kuvu tu ikiwa afisa ugani ameipendekeza."
+      ],
+      "risk": "Hasara ya hadi 60% nchini Kenya."
+    }
+  },
+  "guide": {
+    "eyebrow": "Mwongozo wa magonjwa",
+    "title": "Magonjwa ya kawaida ya mahindi Afrika Mashariki",
+    "lede": "Linganisha dalili kwenye jani lako. Ukiwa na shaka, mwonyeshe afisa ugani wa eneo lako matokeo yako.",
+    "signs": "Dalili za kuangalia",
+    "cause": "Chanzo",
+    "what": "Cha kufanya",
+    "risk": "Hatari kwa mavuno"
+  },
+  "about": {
+    "eyebrow": "Kuhusu",
+    "title": "Jinsi MaizeCare inavyofanya kazi",
+    "model_title": "Modeli mbili za akili bandia",
+    "model_body": "Modeli ya kwanza inatambua ugonjwa. Ya pili imejifunza jinsi majani ya mahindi yenye afya yanavyoonekana na hupima jinsi jani lako lilivyo mbali na afya.",
+    "privacy_title": "Faragha yako",
+    "privacy_body": "Picha huchunguzwa kwenye kumbukumbu na kufutwa mara moja. Hakuna kinachohifadhiwa na huhitaji akaunti.",
+    "advice_title": "Ushauri",
+    "advice_body": "Unatokana na utafiti wa mazao wa Afrika Mashariki na unakaguliwa na afisa ugani wa kilimo."
+  },
+  "footer": {
+    "rights": "© 2026 MaizeCare",
+    "disclaimer": "Si mbadala wa ushauri wa afisa ugani wa eneo lako."
+  }
+}

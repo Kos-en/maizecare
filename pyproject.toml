@@ -13,7 +13,7 @@ dependencies = ["numpy<3", "opencv-python-headless>=4.8.1.78,<5"]  # preprocess.
 
 [project.optional-dependencies]
 data = ["pandas", "pillow>=10.3", "imagehash", "tqdm"]                       # maize-prepare, image cache
-train = ["maize[data]", "torch>=2.6", "scipy", "matplotlib"]  # <2.6: torch.load RCE (CVE-2025-32434)
+train = ["maize[data]", "torch>=2.6", "keras>=3.8", "scikit-learn", "scipy", "matplotlib"]  # torch<2.6: CVE-2025-32434
 serve = ["fastapi>=0.120,<1", "uvicorn<1", "python-multipart>=0.0.18,<1", "onnxruntime<2"]  # the web app only
 
 [dependency-groups]
@@ -23,6 +23,7 @@ dev = ["pytest", "httpx", "ruff", "pip-audit"]
 maize-prepare = "maize.prepare:main"
 maize-train = "maize.train:main"
 maize-evaluate = "maize.evaluate:main"
+maize-train-classifier = "maize.classifier:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
