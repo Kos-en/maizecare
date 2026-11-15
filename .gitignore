@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.venv/
+.env
+
+# data and training outputs live on Drive / locally, never in git
+data/*
+!data/.gitkeep
+!data/manifest.csv
+runs/*
+!runs/.gitkeep
+
+# the release artifacts for the Render image ARE committed (small TFLite files)
+!artifacts/release-lite/
+
+frontend/node_modules/
+frontend/dist/
+static/
+.DS_Store

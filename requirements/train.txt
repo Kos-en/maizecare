@@ -1,0 +1,17 @@
+# Training / evaluation environment (conda env or Colab).
+# On Colab, TensorFlow is preinstalled: DO NOT reinstall it. Record the version it ships
+# with (each run writes env.json) so exports are made with a known TFLite converter.
+tensorflow>=2.16
+pandas
+scikit-learn>=1.1
+scipy
+imagehash
+pillow
+matplotlib
+tqdm
+pyyaml
+numpy
+opencv-python-headless
+pytest
+httpx
+-e .

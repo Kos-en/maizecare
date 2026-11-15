@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "maize"
+version = "0.1.0"
+description = "Two-stage maize leaf disease classifier + autoencoder severity score"
+requires-python = ">=3.10"
+# Core deps only: this is all the Render/TFLite image needs besides the [serve] extra.
+dependencies = [
+  "numpy",
+  "opencv-python-headless",
+  "pyyaml",
+]
+
+[project.optional-dependencies]
+serve = ["fastapi", "uvicorn", "python-multipart", "ai-edge-litert"]
+train = [
+  "tensorflow>=2.16", "pandas", "scikit-learn>=1.1", "scipy", "imagehash",
+  "pillow", "matplotlib", "tqdm",
+]
+dev = ["pytest", "httpx"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

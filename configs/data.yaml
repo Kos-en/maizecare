@@ -1,0 +1,27 @@
+# Paths are relative to $MAIZE_DATA_ROOT (default ./data).
+seed: 42
+
+# One entry per open image collection. `classes` maps folder name -> class label
+# (Healthy | MLND | MSV | Blight). Record licence + URL: they go in the thesis.
+sources:
+  - name: example_source_a
+    path: raw/example_source_a
+    licence: TODO
+    url: TODO
+    classes:
+      healthy: Healthy
+      mlnd: MLND
+      msv: MSV
+      blight: Blight
+
+quality:
+  min_side: 50
+
+hashing:            # tune by LOOKING at sample pairs (scripts/03_split.py --inspect)
+  ahash_max: 4
+  phash_max: 6
+  mode: both        # both | either  ("either" merges more but can chain into giant groups)
+
+split:
+  test_frac: 0.15
+  n_folds: 5
