@@ -2,7 +2,6 @@
 interface ScoreResult {
   score: number; // 0 = healthy-like, 1 = as far from healthy as the worst diseased leaves
   within_healthy_range: boolean;
-  heatmap_png: string; // base64
 }
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -25,7 +24,6 @@ function render(r: ScoreResult): void {
   $("detail").textContent = r.within_healthy_range
     ? "This leaf is within the range of healthy leaves."
     : `Score ${r.score.toFixed(2)} (0 = healthy-like, 1 = very far from healthy).`;
-  $<HTMLImageElement>("heatmap").src = `data:image/png;base64,${r.heatmap_png}`;
   result.hidden = false;
 }
 

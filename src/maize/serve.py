@@ -2,13 +2,13 @@
 
     uvicorn maize.serve:app --port 8000
 
-GET /health, POST /api/score (image -> error, 0-1 score, heat map), and / for the frontend.
+GET /health, POST /api/score (image -> error, 0-1 score), and / for the frontend.
 Photos are processed in memory, never stored. With no model files the app still starts
-and /api/score returns 503, so a first deploy works.
+and /api/score returns 503, so a first deploy works. Heat maps are for developers only
+(maize-evaluate); see docs/observability.md.
 """
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -16,7 +16,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable
 
-import cv2
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
@@ -26,7 +25,6 @@ from .preprocess import decode, to_input
 
 log = logging.getLogger("maize.serve")
 MAX_UPLOAD = 10 * 1024 * 1024
-DISPLAY = 256  # heat map overlay size shown to the user
 
 
 class Scorer:
@@ -45,19 +43,12 @@ class Scorer:
 
     def score(self, rgb: np.ndarray) -> dict:
         x = to_input(rgb)[None]
-        recon = self.run(x)
-        err_map = ((x[0] - recon[0]) ** 2).mean(axis=0)
-        e = float(err_map.mean())
+        e = float(((x - self.run(x)) ** 2).mean())
         med, p99 = self.cal["e_healthy_median"], self.cal["e_disease_p99"]
-        heat = err_map / max(float(err_map.max()), 1e-8)
-        color = cv2.applyColorMap((cv2.resize(heat, (DISPLAY, DISPLAY)) * 255).astype(np.uint8), cv2.COLORMAP_JET)
-        base = cv2.cvtColor(cv2.resize(rgb, (DISPLAY, DISPLAY)), cv2.COLOR_RGB2BGR)
-        png = cv2.imencode(".png", cv2.addWeighted(base, 0.55, color, 0.45, 0))[1]
         return {
             "error": e,
             "score": float(min(1.0, max(0.0, (e - med) / (p99 - med)))),
             "within_healthy_range": bool(e <= self.cal["e_healthy_p95"]),
-            "heatmap_png": base64.b64encode(png.tobytes()).decode(),
             "model_version": self.cal.get("data_version"),
         }
 

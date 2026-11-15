@@ -26,8 +26,8 @@ def scorer(factor):
 
 def test_scorer_output_shape_and_ranges():
     r = scorer(0.9).score(leaf())
-    assert set(r) == {"error", "score", "within_healthy_range", "heatmap_png", "model_version"}
-    assert 0 <= r["score"] <= 1 and r["error"] >= 0 and r["heatmap_png"] and r["model_version"] == "abc123"
+    assert set(r) == {"error", "score", "within_healthy_range", "model_version"}
+    assert 0 <= r["score"] <= 1 and r["error"] >= 0 and r["model_version"] == "abc123"
 
 
 def test_worse_reconstruction_means_higher_score():

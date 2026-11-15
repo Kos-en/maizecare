@@ -14,6 +14,4 @@ h1 { margin:0 0 4px; font-size:1.6rem; } h2 { margin:0 0 12px; }
 .card.warn { border-color:var(--warn); }
 .bar { height:10px; background:var(--line); border-radius:5px; overflow:hidden; }
 .bar > div { height:100%; background:var(--accent); width:0; transition:width .3s; }
-figure { margin:16px 0 0; } figure img { width:100%; border-radius:8px; }
-figcaption { font-size:.8rem; color:var(--muted); text-align:center; }
 [hidden] { display:none !important; }
