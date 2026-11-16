@@ -72,7 +72,7 @@ def world(tmp_path):
 def test_first_run_then_rerun_is_a_noop(world):
     raw, root = world
     df1 = prepare(raw, root, val_frac=0.5)
-    assert (df1["status"] == "ok").sum() == 40 and set(df1["split"]) == {"train", "val"}
+    assert (df1["status"] == "ok").sum() == 40 and {"train", "val"} <= set(df1["split"]) <= {"train", "val", "test"}
     before = load_manifest(root).copy()
     prepare(raw, root, val_frac=0.5)
     pd.testing.assert_frame_equal(before, load_manifest(root))
@@ -118,3 +118,14 @@ def test_new_data_cleans_itself_and_never_moves_old_splits(world):
 def test_manifest_has_expected_columns(world):
     raw, root = world
     assert list(prepare(raw, root).columns) == COLUMNS
+
+
+def test_resplit_keeps_val_and_carves_test_from_train(world):
+    from maize.prepare import bucket_split, resplit
+    raw, root = world
+    old = prepare(raw, root, val_frac=0.3)
+    old_two_way = old.assign(split=old["phash"].map(lambda h: bucket_split(h, 0.3, test_frac=0.0)))
+    new = resplit(old_two_way.copy(), val_frac=0.3)
+    assert (new["split"] == "val").equals(old_two_way["split"] == "val")
+    assert set(new.loc[old_two_way["split"] == "train", "split"]) <= {"train", "test"}
+    assert new.groupby("group")["split"].nunique().max() == 1

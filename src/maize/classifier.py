@@ -107,18 +107,21 @@ def fit(model, base, train: Batches, val: Batches, weights: dict, a) -> pd.DataF
     return pd.concat(history, ignore_index=True)
 
 
-def evaluate(model, val: Batches, y: np.ndarray, labels: list[str], out: Path) -> dict:
-    pred = model.predict(val, verbose=0).argmax(1)
-    cm = confusion_matrix(y, pred, labels=range(len(labels)))
+def plot_confusion(cm: list, labels: list[str], path: Path) -> None:
     fig, ax = plt.subplots(figsize=(6, 5))
     ax.imshow(cm, cmap="Greens")
     ax.set(xticks=range(len(labels)), yticks=range(len(labels)), xticklabels=labels, yticklabels=labels,
-           xlabel="Predicted", ylabel="True", title="Validation confusion matrix")
-    for (i, j), v in np.ndenumerate(cm):
+           xlabel="Predicted", ylabel="True", title="Test confusion matrix")
+    for (i, j), v in np.ndenumerate(np.array(cm)):
         ax.text(j, i, v, ha="center", va="center")
     fig.tight_layout()
-    fig.savefig(out / "confusion.png", dpi=120)
+    fig.savefig(path, dpi=120)
     plt.close(fig)
+
+
+def evaluate(model, data: Batches, y: np.ndarray, labels: list[str]) -> dict:
+    pred = model.predict(data, verbose=0).argmax(1)
+    cm = confusion_matrix(y, pred, labels=range(len(labels)))
     return {
         "accuracy": float(accuracy_score(y, pred)),
         "macro_f1": float(f1_score(y, pred, average="macro")),
@@ -145,20 +148,23 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=True)
     df = load_manifest(root)
     labels = sorted(select(df)["label"].unique())
-    train_rows, val_rows = select(df, split="train"), select(df, split="val")
-    if train_rows.empty or val_rows.empty:
-        raise SystemExit("No train/val images in the manifest. Run `maize-prepare --raw ...` first.")
-    y_train = train_rows["label"].map(labels.index).to_numpy()
-    y_val = val_rows["label"].map(labels.index).to_numpy()
-    print(f"classes={labels}  train={len(train_rows)}  val={len(val_rows)}  backbone={a.backbone}")
+    rows = {s: select(df, split=s) for s in ("train", "val", "test")}
+    if any(r.empty for r in rows.values()):
+        raise SystemExit("Need train, val and test images. Run `maize-prepare --raw ...` (or --resplit) first.")
+    y = {s: r["label"].map(labels.index).to_numpy() for s, r in rows.items()}
+    print(f"classes={labels}  " + "  ".join(f"{s}={len(r)}" for s, r in rows.items()) + f"  backbone={a.backbone}")
 
-    train = Batches(load_images(train_rows, root, CLS_SIZE), y_train, a.batch_size, shuffle=True)
-    val = Batches(load_images(val_rows, root, CLS_SIZE), y_val, a.batch_size, shuffle=False)
+    data = {s: Batches(load_images(r, root, CLS_SIZE), y[s], a.batch_size, shuffle=s == "train")
+            for s, r in rows.items()}
     model, base = build(a.backbone, len(labels))
-    fit(model, base, train, val, class_weights(y_train, len(labels)), a).to_csv(out / "history.csv", index=False)
+    fit(model, base, data["train"], data["val"], class_weights(y["train"], len(labels)), a).to_csv(
+        out / "history.csv", index=False)
 
-    metrics = evaluate(model, val, y_val, labels, out)
-    print(f"validation accuracy={metrics['accuracy']:.3f}  macro-F1={metrics['macro_f1']:.3f}")
+    # val picked the epochs (early stopping); test is untouched until now and gives the reported scores
+    metrics = {s: evaluate(model, data[s], y[s], labels) for s in ("val", "test")}
+    plot_confusion(metrics["test"]["confusion_matrix"], labels, out / "confusion.png")
+    print(f"TEST accuracy={metrics['test']['accuracy']:.3f}  macro-F1={metrics['test']['macro_f1']:.3f}"
+          f"   (val accuracy={metrics['val']['accuracy']:.3f})")
     model.export(str(out / "classifier.onnx"), format="onnx")
     info = {"labels": labels, "img_size": CLS_SIZE, "backbone": a.backbone, "min_confidence": MIN_CONFIDENCE,
             "args": vars(a), "metrics": metrics}

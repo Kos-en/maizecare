@@ -1,7 +1,10 @@
 """Clean new images and add them to data/manifest.csv. Safe to re-run.
 
     maize-prepare --raw /path/to/raw     # raw/<Class>/*.jpg, class = folder name
-    maize-prepare --verify               # check the manifest for train/val leakage
+    maize-prepare --verify               # check the manifest for leakage between splits
+    maize-prepare --resplit              # one-off: re-derive splits (e.g. to add the test split)
+
+Splits by group: about 70% train, 15% val (early stopping, calibration), 15% test (final scores only).
 
 Files already in the manifest are skipped, and an existing image never changes group or split.
 Unusable images are kept in the manifest with a status instead of being dropped.
@@ -26,6 +29,7 @@ EXTS = {".jpg", ".jpeg", ".png"}
 MIN_SIDE = 50
 HAMMING = 6
 VAL_FRAC = 0.15
+TEST_FRAC = 0.15
 SAVE_EVERY = 1000  # save progress so an interrupted run resumes instead of starting over
 _POP8 = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
 
@@ -59,9 +63,19 @@ class Index:
         self.next_group = max(self.next_group, group + 1)
 
 
-def bucket_split(phash_hex: str, val_frac: float) -> str:
+def bucket_split(phash_hex: str, val_frac: float, test_frac: float = TEST_FRAC) -> str:
     """Split from the hash alone, so it does not depend on the order images arrive."""
-    return "val" if (int(phash_hex, 16) % 10_000) / 10_000 < val_frac else "train"
+    u = (int(phash_hex, 16) % 10_000) / 10_000
+    return "val" if u < val_frac else "test" if u < val_frac + test_frac else "train"
+
+
+def resplit(df: pd.DataFrame, val_frac: float = VAL_FRAC) -> pd.DataFrame:
+    """Give every group the split `decide` would give it today (from its first image's hash).
+    Val groups stay val; the test split is carved out of train. Only before training on the old split."""
+    ok = df["status"] == "ok"
+    first = df[ok].groupby("group")["phash"].first()
+    df.loc[ok, "split"] = df.loc[ok, "group"].map(first.map(lambda h: bucket_split(h, val_frac)))
+    return df
 
 
 def decide(label: str, ph: int, ah: int, idx: Index, hamming: int, val_frac: float):
@@ -71,7 +85,7 @@ def decide(label: str, ph: int, ah: int, idx: Index, hamming: int, val_frac: flo
         near = d <= hamming
         if near.any():
             if len(set(idx.split[near])) > 1:
-                return "split_conflict", -1, ""     # near copies of both train and val: would leak
+                return "split_conflict", -1, ""     # near copies in two splits: would leak
             if label not in set(idx.label[near]):
                 return "label_conflict", -1, ""     # same picture filed under another class
             best = np.flatnonzero(near)[np.argmin(d[near])]
@@ -163,7 +177,7 @@ def prepare(raw: Path, root: Path, val_frac: float = VAL_FRAC, hamming: int = HA
 
 
 def count_leaks(df: pd.DataFrame, hamming: int = HAMMING, chunk: int = 512) -> int:
-    """Near-copy pairs of accepted images that sit in different splits. Must be 0."""
+    """Near-copy pairs of accepted images that sit in different splits (train/val/test). Must be 0."""
     ok = df[df["status"] == "ok"].reset_index(drop=True)
     if ok.empty:
         return 0
@@ -195,20 +209,23 @@ def main(argv=None):
     ap.add_argument("--data-root", default=None, help="where manifest.csv lives (default $MAIZE_DATA_ROOT or ./data)")
     ap.add_argument("--val-frac", type=float, default=VAL_FRAC)
     ap.add_argument("--hamming", type=int, default=HAMMING)
-    ap.add_argument("--verify", action="store_true", help="only check the manifest for train/val leakage")
+    ap.add_argument("--verify", action="store_true", help="only check the manifest for leakage between splits")
+    ap.add_argument("--resplit", action="store_true", help="re-derive train/val/test for the existing manifest")
     a = ap.parse_args(argv)
     root = data_root(a.data_root)
     if a.verify:
         df = load_manifest(root)
         n = count_leaks(df, a.hamming)
-        print(f"{n} near-copy pairs cross train/val." + ("" if n == 0 else "  <-- LEAK"))
+        print(f"{n} near-copy pairs cross splits." + ("" if n == 0 else "  <-- LEAK"))
         raise SystemExit(1 if n else 0)
-    if not a.raw:
-        ap.error("--raw is required (or use --verify)")
-    if not Path(a.raw).is_dir():
-        ap.error(f"--raw folder not found: {a.raw}")
-    df = prepare(Path(a.raw), root, a.val_frac, a.hamming)
+    if a.resplit:
+        df = resplit(load_manifest(root), a.val_frac)
+        save_manifest(df, root)
+    elif a.raw and Path(a.raw).is_dir():
+        df = prepare(Path(a.raw), root, a.val_frac, a.hamming)
+    else:
+        ap.error(f"--raw folder not found: {a.raw}" if a.raw else "--raw is required (or --verify / --resplit)")
     report(df)
     n = count_leaks(df, a.hamming)
-    print(f"\nleak check: {n} near-copy pairs cross train/val.")
+    print(f"\nleak check: {n} near-copy pairs cross splits.")
     raise SystemExit(1 if n else 0)

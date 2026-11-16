@@ -42,12 +42,15 @@ Retraining is manual. Each model records the `data_version` it was trained on in
 
 ### What `prepare` guarantees
 - Idempotent: files already in the manifest are skipped.
-- Splits never drift: an existing image keeps its group and train/val split.
+- Three splits by group: ~70% train, 15% val (early stopping, calibration), 15% test (final reported scores only).
+- Splits never drift: an existing image keeps its group and split.
 - Near-duplicates cannot leak: a new image within 6 bits (min of pHash/aHash, as in the notebook) of an
-  existing one inherits its split. If it is near both a train and a val image it is quarantined.
+  existing one inherits its split. If it is near images in two different splits it is quarantined.
 - Bad data is recorded in the `status` column, not dropped: `bad_image`, `too_small`, `duplicate_exact`,
   `label_conflict` (same picture under another class), `split_conflict`.
-- New groups get a split from their hash (`val_frac`, default 15%), so arrival order does not matter.
+- New groups get a split from their hash, so arrival order does not matter.
+- `maize-prepare --resplit` re-derives splits for an existing manifest (used once to add the test split;
+  val stays the same, test is carved out of train). Only do this before training.
 - `maize-prepare --verify` re-checks the whole manifest for leakage (exit code 1 if any).
 
 ## Web app
@@ -133,5 +136,4 @@ If a session dies, nothing is lost: the manifest, cache and models are on Drive.
 - Group assignment is incremental (see above) instead of one-off complete-linkage clustering.
 
 ## Not built yet
-Leaf masking, a held-out test split (the classifier is scored on the validation split), and the
-monitoring in docs/observability.md. Tag `old-keras-scaffold` keeps an earlier TF/Keras scaffold.
+Leaf masking and the monitoring in docs/observability.md. Tag `old-keras-scaffold` keeps an earlier TF/Keras scaffold.

@@ -28,15 +28,15 @@ plt.switch_backend("Agg")  # save figures to files, never open windows
 Errors = Callable[[pd.DataFrame], np.ndarray]  # manifest rows -> reconstruction error per image
 
 
-def healthy_check(train_err: np.ndarray, val_err: np.ndarray) -> dict:
-    """Held-out healthy leaves should reconstruct as well as training ones."""
+def healthy_check(train_err: np.ndarray, held_out: dict[str, np.ndarray]) -> dict:
+    """Held-out healthy leaves (val, test) should reconstruct as well as training ones."""
     threshold = float(np.percentile(train_err, 95))
-    return {
-        "train_error_mean": float(train_err.mean()), "train_error_std": float(train_err.std()),
-        "val_error_mean": float(val_err.mean()), "val_error_std": float(val_err.std()),
-        "false_positive_threshold_p95_train": threshold,
-        "false_positive_rate_val": float((val_err > threshold).mean()),
-    }
+    out = {"train_error_mean": float(train_err.mean()), "train_error_std": float(train_err.std()),
+           "false_positive_threshold_p95_train": threshold}
+    for name, e in held_out.items():
+        out |= {f"{name}_error_mean": float(e.mean()), f"{name}_error_std": float(e.std()),
+                f"false_positive_rate_{name}": float((e > threshold).mean())}
+    return out
 
 
 def error_by_class(class_errors: dict[str, np.ndarray], out: Path) -> dict:
@@ -143,14 +143,17 @@ def main(argv=None):
     def sample(rows: pd.DataFrame, n: int) -> pd.DataFrame:
         return rows.sample(min(n, len(rows)), random_state=a.seed)
 
-    # healthy is represented by its held-out val split; each disease by all its accepted images
-    val_rows = select(df, label=HEALTHY, split="val")
+    # calibration uses healthy val; reported numbers use healthy test (never seen while training or calibrating).
+    # Diseases are never trained on, so all their accepted images count as unseen.
+    val_rows, test_rows = select(df, label=HEALTHY, split="val"), select(df, label=HEALTHY, split="test")
+    if test_rows.empty:
+        raise SystemExit("No healthy test images. Run `maize-prepare --resplit` first.")
     diseases = {d: select(df, label=d) for d in sorted(set(select(df)["label"]) - {HEALTHY})}
-    by_class = {HEALTHY: val_rows, **diseases}
+    by_class = {HEALTHY: test_rows, **diseases}
     results: dict = {}
 
     train_err, val_err = errors(select(df, label=HEALTHY, split="train")), errors(val_rows)
-    results["healthy"] = healthy_check(train_err, val_err)
+    results["healthy"] = healthy_check(train_err, {"val": val_err, "test": errors(test_rows)})
     print("Healthy:", json.dumps(results["healthy"], indent=2))
 
     class_errors = {c: errors(sample(r, a.sample_n)) for c, r in by_class.items() if len(r)}
