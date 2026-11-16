@@ -1,33 +1,21 @@
-# RAW is the folder with <Class>/ subfolders of images.
+# RAW is the folder with one subfolder of images per class (Healthy/ MLB/ MLND/ MSV/).
 RAW ?= data/raw
 DATA ?= data
-MODEL ?= models/ae
-CLF ?= models/clf
+MODELS ?= models
 
-.PHONY: install data verify train eval classifier release frontend serve docker test lock all
+.PHONY: install data all release frontend serve docker test lock
 
 install:                             # everything except torch (Colab has it; add ,train elsewhere)
 	pip install -e ".[data,serve]" --group dev
 
-data:                                # clean, dedup and split new images (safe to re-run)
-	maize-prepare --raw $(RAW) --data-root $(DATA)
+data:                                # clean, group and split the images (CPU; safe to re-run)
+	maize prepare --raw $(RAW) --data-root $(DATA)
 
-verify:                              # fail if any near-copy crosses train/val
-	maize-prepare --verify --data-root $(DATA)
+all:                                 # the whole pipeline: data -> classifier -> autoencoder -> evaluate -> release
+	maize all --raw $(RAW) --data-root $(DATA) --out $(MODELS)
 
-train:                               # also exports model.onnx
-	maize-train --data-root $(DATA) --out $(MODEL)
-
-eval:                                # also writes calibration.json
-	maize-evaluate --data-root $(DATA) --model-dir $(MODEL)
-
-classifier:                          # stage 1: which disease (also exports classifier.onnx)
-	maize-train-classifier --data-root $(DATA) --out $(CLF)
-
-release:                             # the small files the web app ships with (commit them)
-	mkdir -p release
-	cp $(MODEL)/model.onnx $(MODEL)/calibration.json $(MODEL)/meta.json release/
-	cp $(CLF)/classifier.onnx $(CLF)/classifier.json release/
+release:                             # copy the trained files the web app ships with (commit them)
+	mkdir -p release && cp $(MODELS)/release/* release/
 
 frontend:                            # compile TypeScript -> frontend/dist
 	cd frontend && npm ci --ignore-scripts && npm run build
@@ -43,5 +31,3 @@ docker:
 
 test:
 	pytest -q
-
-all: data verify train eval classifier release

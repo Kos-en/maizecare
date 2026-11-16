@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from .preprocess import IMG_SIZE, resize
+from .preprocess import resize
 
 
 def _read(path: str, size: int) -> np.ndarray:
@@ -26,7 +26,7 @@ def _read(path: str, size: int) -> np.ndarray:
     return resize(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), size)
 
 
-def load_images(rows: pd.DataFrame, root: Path, size: int = IMG_SIZE, workers: int = 8) -> np.ndarray:
+def load_images(rows: pd.DataFrame, root: Path, size: int, workers: int = 8) -> np.ndarray:
     """(N,size,size,3) uint8 for the manifest rows, in the same order. Reads only uncached images."""
     f = root / f"cache_{size}.npz"
     if f.exists():

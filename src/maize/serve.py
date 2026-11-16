@@ -6,7 +6,7 @@ GET /health, POST /api/score (image -> disease label + confidence, 0-1 severity)
 Stage 1 is the Keras classifier (classifier.onnx), stage 2 the healthy-only autoencoder (model.onnx).
 Photos are processed in memory, never stored. With no model files the app still starts
 and /api/score returns 503, so a first deploy works. Heat maps are for developers only
-(maize-evaluate); see docs/observability.md.
+(maize evaluate); see docs/observability.md.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from .preprocess import CLS_SIZE, decode, resize, to_input
+from .preprocess import AE_SIZE, CLS_SIZE, decode, resize
 
 log = logging.getLogger("maize.serve")
 MAX_UPLOAD = 10 * 1024 * 1024
@@ -40,7 +40,7 @@ def onnx_runner(path: Path) -> Run:
 
 class Scorer:
     """classify: (1,224,224,3) RGB 0-255 -> class probabilities.
-    reconstruct: (1,3,128,128) in [0,1] -> its reconstruction by the healthy-only autoencoder."""
+    reconstruct: (1,128,128,3) RGB 0-255 -> its reconstruction in 0-1 by the healthy-only autoencoder."""
 
     def __init__(self, classify: Run, reconstruct: Run, classes: dict, calibration: dict):
         self.classify, self.reconstruct = classify, reconstruct
@@ -55,8 +55,8 @@ class Scorer:
     def score(self, rgb: np.ndarray) -> dict:
         probs = self.classify(resize(rgb, CLS_SIZE)[None].astype(np.float32))[0]
         top = int(probs.argmax())
-        x = to_input(rgb)[None]
-        e = float(((x - self.reconstruct(x)) ** 2).mean())
+        x = resize(rgb, AE_SIZE)[None].astype(np.float32)
+        e = float(((x / 255.0 - self.reconstruct(x)) ** 2).mean())
         med, p99 = self.cal["e_healthy_median"], self.cal["e_disease_p99"]
         return {
             "label": self.labels[top],

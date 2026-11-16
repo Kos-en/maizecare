@@ -1,12 +1,12 @@
 """Photo -> model input. Shared by training and the web app so both see identical pixels.
-Only numpy + OpenCV, because the serving image has no torch."""
+Only numpy + OpenCV, because the web app has no torch or Keras."""
 from __future__ import annotations
 
 import cv2
 import numpy as np
 
-IMG_SIZE = 128   # autoencoder input
-CLS_SIZE = 224   # classifier input (ImageNet backbones)
+CLS_SIZE = 224  # classifier input (ImageNet backbones)
+AE_SIZE = 128   # autoencoder input
 
 
 def decode(data: bytes) -> np.ndarray | None:
@@ -15,16 +15,10 @@ def decode(data: bytes) -> np.ndarray | None:
     return None if bgr is None else cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
 
-def resize(rgb: np.ndarray, size: int = IMG_SIZE) -> np.ndarray:
-    """RGB uint8 HxWx3 -> RGB uint8 size x size x 3 (this is what the image cache stores)."""
-    return cv2.resize(rgb, (size, size))
-
-
-def to_tensor(img: np.ndarray) -> np.ndarray:
-    """Resized uint8 HxWx3 -> float32 3x128x128 in [0,1]."""
-    return np.ascontiguousarray((img.astype(np.float32) / 255.0).transpose(2, 0, 1))
-
-
-def to_input(rgb: np.ndarray) -> np.ndarray:
-    """Full-size RGB photo -> model input."""
-    return to_tensor(resize(rgb))
+def resize(rgb: np.ndarray, size: int) -> np.ndarray:
+    """Pad to a square with black, then resize, so the leaf keeps its shape (proposal 3.4)."""
+    h, w = rgb.shape[:2]
+    side = max(h, w)
+    top, left = (side - h) // 2, (side - w) // 2
+    square = cv2.copyMakeBorder(rgb, top, side - h - top, left, side - w - left, cv2.BORDER_CONSTANT, value=0)
+    return cv2.resize(square, (size, size), interpolation=cv2.INTER_AREA)

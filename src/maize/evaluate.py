@@ -1,171 +1,113 @@
-"""Evaluate a trained model: false-positive check on healthy, error by class, correlation with
-the formula severity, heat maps. Output goes to <model-dir>/eval/; also writes calibration.json.
+"""Severity from the autoencoder (proposal 3.5.2 and 3.6): calibrate on val, report on test.
 
-    maize-evaluate --model-dir models/ae
+    score s(x) = clip((e - median healthy val error) / (p99 diseased val error - median healthy val error), 0, 1)
+    healthy range: e <= p95 of healthy val errors
+    grades: per disease, the tertiles of training scores split mild / moderate / severe
+
+Reported on test: AUROC healthy vs each disease, false-high rate on healthy leaves, Spearman between
+the error and the colour reference index (severity.py), and how much the score varies inside a
+near-copy group (stability).
 """
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
-from typing import Callable
 
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-import torch
-from scipy.stats import spearmanr
-from tqdm import tqdm
+from scipy.stats import mannwhitneyu, spearmanr
 
-from .autoencoder import load_model, pick_device, reconstruction_errors
 from .cache import load_images
-from .data import HEALTHY, abs_paths, data_root, load_manifest, select
-from .preprocess import decode, to_input
+from .data import HEALTHY, data_version, select
+from .preprocess import AE_SIZE
 from .severity import extract_quick_features, formula_severity
 
-plt.switch_backend("Agg")  # save figures to files, never open windows
 
-Errors = Callable[[pd.DataFrame], np.ndarray]  # manifest rows -> reconstruction error per image
-
-
-def healthy_check(train_err: np.ndarray, held_out: dict[str, np.ndarray]) -> dict:
-    """Held-out healthy leaves (val, test) should reconstruct as well as training ones."""
-    threshold = float(np.percentile(train_err, 95))
-    out = {"train_error_mean": float(train_err.mean()), "train_error_std": float(train_err.std()),
-           "false_positive_threshold_p95_train": threshold}
-    for name, e in held_out.items():
-        out |= {f"{name}_error_mean": float(e.mean()), f"{name}_error_std": float(e.std()),
-                f"false_positive_rate_{name}": float((e > threshold).mean())}
-    return out
+def score(errors: pd.Series, cal: dict) -> pd.Series:
+    healthy, disease = cal["e_healthy_median"], cal["e_disease_p99"]
+    return ((errors - healthy) / (disease - healthy)).clip(0, 1)
 
 
-def error_by_class(class_errors: dict[str, np.ndarray], out: Path) -> dict:
-    stats = {c: {"mean": float(e.mean()), "median": float(np.median(e)), "n": len(e)} for c, e in class_errors.items()}
-    for c, s in stats.items():
-        print(f"{c:8s}: mean={s['mean']:.5f}  median={s['median']:.5f}  n={s['n']}")
-    plt.figure(figsize=(8, 6))
-    plt.boxplot(list(class_errors.values()))
-    plt.xticks(range(1, len(class_errors) + 1), list(class_errors.keys()))
-    plt.ylabel("Reconstruction Error (MSE)")
-    plt.title("Reconstruction Error by Class (Healthy-Trained Autoencoder)")
-    plt.savefig(out / "error_by_class.png", dpi=120)
-    plt.close()
-    return stats
+def calibrate(rows: pd.DataFrame) -> dict:
+    """rows: usable images with label, split and error. Uses val for the scale, train for the grades."""
+    healthy = rows["label"] == HEALTHY
+    healthy_val = rows.loc[healthy & (rows["split"] == "val"), "error"]
+    disease_val = rows.loc[~healthy & (rows["split"] == "val"), "error"]
+    cal = {"e_healthy_median": healthy_val.median(), "e_healthy_p95": healthy_val.quantile(0.95),
+           "e_disease_p99": disease_val.quantile(0.99)}
+    if cal["e_disease_p99"] <= cal["e_healthy_median"]:
+        raise SystemExit("Diseased leaves do not reconstruct worse than healthy ones: the autoencoder is not usable.")
+
+    disease_train = rows[~healthy & (rows["split"] == "train")]
+    tertiles = score(disease_train["error"], cal).groupby(disease_train["label"]).quantile([1 / 3, 2 / 3])
+    cal["grades"] = {d: tertiles[d].tolist() for d in disease_train["label"].unique()}
+    return cal
 
 
-def write_calibration(model_dir: Path, val_err: np.ndarray, threshold: float,
-                      class_errors: dict[str, np.ndarray]) -> None:
-    """Numbers the web app needs: score = clip((e - healthy median) / (diseased p99 - healthy median), 0, 1)."""
-    cal_file = model_dir / "calibration.json"
-    cal_file.unlink(missing_ok=True)  # never leave a stale calibration from an earlier model
-    disease_err = [e for c, e in class_errors.items() if c != HEALTHY]
-    if not disease_err:
-        print("WARNING: no diseased images, so no calibration.json written.")
-        return
-    e_med = float(np.median(val_err))
-    e_d99 = float(np.percentile(np.concatenate(disease_err), 99))
-    if e_d99 <= e_med:
-        print("WARNING: diseased errors are not above healthy, so no calibration.json written.")
-        return
-    meta = json.loads((model_dir / "meta.json").read_text())
-    cal_file.write_text(json.dumps({"e_healthy_median": e_med, "e_healthy_p95": threshold,
-                                    "e_disease_p99": e_d99, "data_version": meta.get("data_version")}, indent=2))
-    print("Wrote calibration.json")
+def auroc(healthy: pd.Series, diseased: pd.Series) -> float:
+    """Chance that a diseased leaf has a higher error than a healthy one (Mann-Whitney U / n1 n2)."""
+    return float(mannwhitneyu(diseased, healthy).statistic / (len(diseased) * len(healthy)))
 
 
-def formula_correlation(name: str, rows: pd.DataFrame, root: Path, errors: Errors, out: Path) -> dict | None:
-    """Spearman between the autoencoder error and the notebook's formula severity for one disease."""
-    keep, scores = [], []
-    for i, p in enumerate(tqdm(abs_paths(rows, root), desc=f"{name} formula features")):
-        try:  # the formula needs the full-size photo; skip any that cannot be read
-            scores.append(formula_severity(extract_quick_features(p)))
-            keep.append(i)
-        except Exception:
-            pass
-    if len(keep) < 3:
-        return None
-    errs = errors(rows.iloc[keep])
-    rho, pval = spearmanr(errs, scores)
-    print(f"{name}: Spearman rho={rho:.3f}, p={pval:.4f}  (n={len(keep)})")
-    plt.figure(figsize=(6, 6))
-    plt.scatter(scores, errs, alpha=0.4, s=15)
-    plt.xlabel("Formula-Based Severity Score")
-    plt.ylabel("Autoencoder Reconstruction Error")
-    plt.title(f"{name}: rho={rho:.3f}, p={pval:.4f}")
-    plt.savefig(out / f"correlation_{name}.png", dpi=120)
-    plt.close()
-    return {"spearman_rho": float(rho), "p_value": float(pval), "n": len(keep)}
+def report(rows: pd.DataFrame, cal: dict, root: Path, reference_n: int) -> dict:
+    test = rows[rows["split"] == "test"]
+    healthy = test[test["label"] == HEALTHY]
+    results = {
+        "false_high_rate": float((healthy["error"] > cal["e_healthy_p95"]).mean()),
+        "within_group_score_sd": float(test.groupby("group")["score"].std().median()),
+    }
+    for disease, leaves in test[test["label"] != HEALTHY].groupby("label"):
+        sample = leaves.sample(min(reference_n, len(leaves)), random_state=0)
+        reference = [formula_severity(extract_quick_features(Path(root) / p)) for p in sample["path"]]
+        results[disease] = {
+            "n": len(leaves),
+            "auroc_vs_healthy": auroc(healthy["error"], leaves["error"]),
+            "median_score": float(leaves["score"].median()),
+            "spearman_vs_reference": float(spearmanr(sample["error"], reference).statistic),
+        }
+    return results
 
 
-@torch.no_grad()
-def save_reconstruction_figure(model, image_path, title, out_file, device):
-    x = torch.from_numpy(to_input(decode(Path(image_path).read_bytes())))[None].to(device)
-    recon = model(x).cpu().numpy()[0].transpose(1, 2, 0)
-    original = x.cpu().numpy()[0].transpose(1, 2, 0)
-    error_map = np.mean((original - recon) ** 2, axis=2)
+def figures(rows: pd.DataFrame, model, root: Path, out: Path) -> None:
+    """error_by_class.png (test) and heatmaps.png (one test leaf per class: photo, reconstruction, error)."""
+    import matplotlib.pyplot as plt
+    plt.switch_backend("Agg")
+    test = rows[rows["split"] == "test"]
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-    axes[0].imshow(original)
-    axes[0].set_title("Original")
-    axes[1].imshow(recon)
-    axes[1].set_title("Reconstruction")
-    im = axes[2].imshow(error_map, cmap="hot")
-    axes[2].set_title("Error Heatmap")
-    for a in axes:
-        a.axis("off")
-    fig.colorbar(im, ax=axes[2], fraction=0.046)
-    fig.suptitle(title)
-    plt.tight_layout()
-    fig.savefig(out_file, dpi=120)
+    fig, ax = plt.subplots(figsize=(7, 5))
+    classes = sorted(test["label"].unique())
+    ax.boxplot([test.loc[test["label"] == c, "error"] for c in classes], tick_labels=classes)
+    ax.set(title="Reconstruction error on test leaves", ylabel="error e(x)")
+    fig.savefig(out / "error_by_class.png", dpi=120)
+    plt.close(fig)
+
+    examples = test.groupby("label").sample(1, random_state=0)
+    images = load_images(examples, root, AE_SIZE)
+    recons = model.predict(images.astype("float32"), verbose=0)
+    fig, axes = plt.subplots(len(examples), 3, figsize=(9, 3 * len(examples)), squeeze=False)
+    for row, image, recon, label in zip(axes, images, recons, examples["label"]):
+        error_map = ((image / 255.0 - recon) ** 2).mean(axis=-1)
+        for ax, picture, title in zip(row, (image, recon, error_map), (label, "reconstruction", "error")):
+            ax.imshow(picture, cmap="hot")
+            ax.set_title(title)
+            ax.axis("off")
+    fig.tight_layout()
+    fig.savefig(out / "heatmaps.png", dpi=120)
     plt.close(fig)
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--model-dir", default="models/ae")
-    ap.add_argument("--data-root", default=None)
-    ap.add_argument("--sample-n", type=int, default=1500, help="max images per class for the error comparison")
-    ap.add_argument("--corr-n", type=int, default=500, help="images per disease for the formula correlation")
-    ap.add_argument("--seed", type=int, default=42)
-    a = ap.parse_args(argv)
+def run(df: pd.DataFrame, root: Path, folder: Path, reference_n: int = 300) -> None:
+    """Writes calibration.json (used by the web app), metrics.json, scores.csv and figures to folder."""
+    from .models import load_autoencoder, reconstruction_errors
 
-    device = pick_device()
-    root = data_root(a.data_root)
-    model_dir = Path(a.model_dir)
-    out = model_dir / "eval"
-    out.mkdir(parents=True, exist_ok=True)
-    df = load_manifest(root)
-    model = load_model(model_dir, device)
+    model = load_autoencoder(folder)
+    rows = select(df).copy()
+    rows["error"] = reconstruction_errors(model, load_images(rows, root, AE_SIZE))
+    cal = calibrate(rows) | {"data_version": data_version(df)}
+    rows["score"] = score(rows["error"], cal)
+    results = report(rows, cal, root, reference_n)
 
-    def errors(rows: pd.DataFrame) -> np.ndarray:
-        return reconstruction_errors(model, load_images(rows, root), device)
-
-    def sample(rows: pd.DataFrame, n: int) -> pd.DataFrame:
-        return rows.sample(min(n, len(rows)), random_state=a.seed)
-
-    # calibration uses healthy val; reported numbers use healthy test (never seen while training or calibrating).
-    # Diseases are never trained on, so all their accepted images count as unseen.
-    val_rows, test_rows = select(df, label=HEALTHY, split="val"), select(df, label=HEALTHY, split="test")
-    if test_rows.empty:
-        raise SystemExit("No healthy test images. Run `maize-prepare --resplit` first.")
-    diseases = {d: select(df, label=d) for d in sorted(set(select(df)["label"]) - {HEALTHY})}
-    by_class = {HEALTHY: test_rows, **diseases}
-    results: dict = {}
-
-    train_err, val_err = errors(select(df, label=HEALTHY, split="train")), errors(val_rows)
-    results["healthy"] = healthy_check(train_err, {"val": val_err, "test": errors(test_rows)})
-    print("Healthy:", json.dumps(results["healthy"], indent=2))
-
-    class_errors = {c: errors(sample(r, a.sample_n)) for c, r in by_class.items() if len(r)}
-    results["error_by_class"] = error_by_class(class_errors, out)
-    write_calibration(model_dir, val_err, results["healthy"]["false_positive_threshold_p95_train"], class_errors)
-
-    corr = {d: formula_correlation(d, sample(r, a.corr_n), root, errors, out) for d, r in diseases.items()}
-    results["formula_correlation"] = {d: v for d, v in corr.items() if v is not None}
-
-    for c, rows in by_class.items():  # one example heat map per class
-        if len(rows):
-            save_reconstruction_figure(model, abs_paths(sample(rows, 1), root)[0], c, out / f"heatmap_{c}.png", device)
-
-    (out / "metrics.json").write_text(json.dumps(results, indent=2))
-    print(f"\nWrote results to {out}")
+    (folder / "calibration.json").write_text(json.dumps(cal, indent=2))
+    (folder / "metrics.json").write_text(json.dumps(results, indent=2))
+    rows[["path", "label", "split", "group", "error", "score"]].to_csv(folder / "scores.csv", index=False)
+    figures(rows, model, root, folder)
+    print(json.dumps(results, indent=2))

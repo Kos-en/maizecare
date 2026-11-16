@@ -25,7 +25,7 @@ def scorer(factor, probs=(0.1, 0.1, 0.1, 0.7)):
     def classify(x):
         assert x.shape == (1, 224, 224, 3) and x.dtype == np.float32
         return np.array([probs], np.float32)
-    return Scorer(classify, lambda x: np.clip(x * factor, 0, 1).astype(np.float32), CLASSES, CAL)
+    return Scorer(classify, lambda x: (x / 255 * factor).astype(np.float32), CLASSES, CAL)  # x: 0-255 in, 0-1 out
 
 
 def test_scorer_output_shape_and_ranges():
