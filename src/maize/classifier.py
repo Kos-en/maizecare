@@ -7,6 +7,9 @@ those of the epoch with the best val macro-F1. Several backbones are trained on 
 compared: pick on val, report test.
 
 Input: RGB 224 x 224, values 0-255, the whole photo (not masked). Exported to ONNX for the web app.
+
+    maize-train-classifier ROOT MODELS [BACKBONE ...]     default: all 4 backbones
+        -> MODELS/classifiers.csv (the comparison), MODELS/clf_<backbone>/
 """
 from __future__ import annotations
 
@@ -23,10 +26,10 @@ import pandas as pd
 from keras import layers
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
-from .batches import SEED, Batches
-from .cache import load_images
-from .data import select
-from .preprocess import CLS_SIZE
+from maize.batches import SEED, Batches
+from maize.cache import load_images
+from maize.pipeline import command_args, load_usable_manifest, select
+from maize.preprocess import CLS_SIZE
 
 # name -> (constructor, input preprocessing; None = the backbone does its own)
 BACKBONES = {
@@ -37,6 +40,7 @@ BACKBONES = {
 }
 MIN_CONFIDENCE = 0.6  # below this the app asks for a better photo instead of guessing
 UNFREEZE = 40         # backbone layers fine-tuned in phase 2
+EPOCHS = 10           # per phase; early stopping usually ends sooner
 PHASES = (("head", 1e-3, 0), ("finetune", 1e-5, UNFREEZE))  # (name, learning rate, layers unfrozen)
 
 
@@ -181,3 +185,11 @@ def train_all(df: pd.DataFrame, root: Path, out: Path, backbones: list[str], epo
                       **{f"test_recall_{c}": test["per_class"][c]["recall"] for c in labels}})
         keras.backend.clear_session()
     return pd.DataFrame(table)
+
+
+def main():
+    root, out, *backbones = command_args("maize-train-classifier DATA_ROOT MODELS [BACKBONE ...]", required=2)
+    root, out = Path(root), Path(out)
+    table = train_all(load_usable_manifest(root), root, out, backbones or list(BACKBONES), EPOCHS)
+    table.to_csv(out / "classifiers.csv", index=False)
+    print("\n" + table.to_string(index=False))

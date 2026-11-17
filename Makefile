@@ -10,7 +10,7 @@ install:                             # everything except torch (Colab has it; ad
 	pip install -e ".[data,serve]" --group dev
 
 data:                                # the data pipeline: check, group, split, cache images + leaf masks
-	maize prepare --raw $(RAW) --data-root $(DATA)
+	maize-prepare $(RAW) $(DATA)
 
 release:                             # copy the 4 files the web app ships with (commit them)
 	mkdir -p release

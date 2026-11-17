@@ -11,6 +11,9 @@ baselines get the same Spearman, so the autoencoder has something to beat:
     colour       mean colour distance of the leaf pixels from the average healthy training leaf
 Also: false-high rate on healthy leaves, score spread inside near-copy groups (stability), and per
 class the share of leaf masks flagged as doubtful (leaf fraction < 0.10 or > 0.95).
+
+    maize-evaluate ROOT MODELS [CLASSIFIER_DIR]     -> MODELS/ae/calibration.json, metrics.json, figures
+        CLASSIFIER_DIR (e.g. MODELS/clf_mobilenet_v2) adds the classifier baseline
 """
 from __future__ import annotations
 
@@ -21,10 +24,10 @@ import numpy as np
 import pandas as pd
 from scipy.stats import mannwhitneyu, spearmanr
 
-from .cache import load
-from .data import HEALTHY, data_version, select
-from .preprocess import AE_SIZE, CLS_SIZE, mask_background
-from .severity import symptomatic_area
+from maize.cache import load
+from maize.pipeline import HEALTHY, command_args, data_version, load_usable_manifest, select
+from maize.preprocess import AE_SIZE, CLS_SIZE, mask_background
+from maize.severity import symptomatic_area
 
 MASK_OK = (0.10, 0.95)  # leaf fraction outside this range: the mask is doubtful
 
@@ -158,7 +161,7 @@ def figures(rows: pd.DataFrame, autoencoder, root: Path, out: Path) -> None:
 # ---- the step ------------------------------------------------------------------------------------
 def run(df: pd.DataFrame, root: Path, folder: Path, classifier_dir: Path | None = None) -> None:
     """Writes calibration.json (used by the web app), metrics.json, scores.csv and figures to folder."""
-    from .autoencoder import Autoencoder
+    from maize.autoencoder import Autoencoder
 
     autoencoder = Autoencoder.load(folder)
     rows = select(df).copy()
@@ -186,3 +189,9 @@ def run(df: pd.DataFrame, root: Path, folder: Path, classifier_dir: Path | None 
         folder / "test_scores.csv", index=False)
     figures(rows, autoencoder, root, folder)
     print(json.dumps(results, indent=2))
+
+
+def main():
+    root, out, *classifier = command_args("maize-evaluate DATA_ROOT MODELS [CLASSIFIER_DIR]", required=2)
+    classifier_dir = Path(classifier[0]) if classifier else None
+    run(load_usable_manifest(Path(root)), Path(root), Path(out) / "ae", classifier_dir)

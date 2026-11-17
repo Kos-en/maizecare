@@ -8,8 +8,7 @@ Two Keras models behind one web app for farmers (English and Kiswahili), followi
 
 ```
 src/maize/
-  cli.py          the `maize` command
-  data.py         check, group and split the images -> manifest.csv                (no torch)
+  pipeline.py     the data pipeline (DataPipeline) and the manifest it writes    (no torch)
   preprocess.py   photo -> model input + leaf mask, shared by training and the web app
   cache.py        resized images and leaf masks, cached once per size
   classifier.py   stage 1: Keras CNN, 4 backbones compared, exported to ONNX
@@ -21,12 +20,12 @@ src/maize/
 frontend/         plain TypeScript UI, compiled to static files
 ```
 
-## The data pipeline: `maize prepare`
+## The data pipeline: `maize-prepare`
 
 Every image goes through this before any training, and new photos get exactly the same treatment.
 
 ```bash
-maize prepare --raw RAW --data-root ROOT      # RAW/<Class>/*.jpg; re-run after adding photos
+maize-prepare RAW ROOT       # RAW/<Class>/*.jpg; re-run after adding photos
 ```
 1. **File check**: opens as JPEG/PNG and the shortest side is at least 50 px, else `bad_image` / `too_small`.
 2. **Near copies**: min(pHash, aHash) Hamming distance <= 6. Chains of near copies form one group.
@@ -46,9 +45,9 @@ retrain after adding data. Unusable images stay in the manifest with a status.
 ## Training and evaluation
 
 ```bash
-maize classifier  --data-root ROOT --out MODELS     # 4 backbones, or --backbones mobilenet_v2
-maize autoencoder --data-root ROOT --out MODELS     # healthy train leaves, inside the leaf mask
-maize evaluate    --data-root ROOT --out MODELS --classifier MODELS/clf_<best backbone>
+maize-train-classifier  ROOT MODELS                  # all 4 backbones, or add e.g. mobilenet_v2
+maize-train-autoencoder ROOT MODELS                  # healthy train leaves, inside the leaf mask
+maize-evaluate          ROOT MODELS MODELS/clf_<best backbone>
 ```
 - **Classifier**: head, then fine-tune; class weights; blur / noise / brightness augmentation (no hue);
   keeps the epoch with the best val macro-F1. `MODELS/classifiers.csv` compares the backbones: pick the
@@ -61,7 +60,8 @@ maize evaluate    --data-root ROOT --out MODELS --classifier MODELS/clf_<best ba
   colour distance from the average healthy leaf). Writes `calibration.json`, `metrics.json`,
   `test_scores.csv`, `error_by_class.png`, `heatmaps.png` to `MODELS/ae/`.
 
-`maize --help` lists every option.
+Each command prints its usage line if run without arguments. The commands are declared in
+`pyproject.toml` (`[project.scripts]`), the same way Superset declares `superset`.
 
 ## Colab
 
@@ -71,10 +71,9 @@ Data, caches and models live on Drive, so a dead session loses nothing.
 cd /content && git clone -b mask-and-severity https://github.com/Kos-en/maizecare repo && cd repo
 pip install -q --no-deps -e . && pip install -q imagehash onnx onnxscript onnxruntime
 export KERAS_BACKEND=torch D=/content/drive/MyDrive M=/content/drive/MyDrive/maize_models
-maize prepare --raw $D/cv_datasets_cleaned --data-root $D        # CPU is enough
-nohup sh -c "maize classifier --data-root $D --out $M && maize autoencoder --data-root $D --out $M" \
-  > $D/train.log 2>&1 &                                          # GPU (L4)
-maize evaluate --data-root $D --out $M --classifier $M/clf_<best backbone>
+maize-prepare $D/cv_datasets_cleaned $D                              # CPU is enough
+nohup sh -c "maize-train-classifier $D $M && maize-train-autoencoder $D $M" > $D/train.log 2>&1 &   # GPU (L4)
+maize-evaluate $D $M $M/clf_<best backbone>          # after reading $M/classifiers.csv
 ```
 
 ## Web app
@@ -90,7 +89,7 @@ its confidence (`confident` is false below `min_confidence` in `classifier.json`
 0-1 severity score `(e - median healthy) / (p99 diseased - median healthy)`. The UI shows Healthy for a
 healthy label, otherwise grades the disease mild / moderate / severe from the score. All UI text is in
 `frontend/public/i18n/{en,sw}.json`; the Kiswahili still needs a review by a native speaker and the
-advice by an extension officer. Heat maps are a developer tool (`maize evaluate`, heatmaps.png), not shown to users; production
+advice by an extension officer. Heat maps are a developer tool (`maize-evaluate`, heatmaps.png), not shown to users; production
 monitoring is planned in [docs/observability.md](docs/observability.md).
 
 ## Dependencies, CI and deployment

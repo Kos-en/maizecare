@@ -20,7 +20,10 @@ serve = ["fastapi>=0.120,<1", "uvicorn<1", "python-multipart>=0.0.18,<1", "onnxr
 dev = ["pytest", "httpx", "ruff", "pip-audit"]
 
 [project.scripts]
-maize = "maize.cli:main"
+maize-prepare = "maize.pipeline:main"
+maize-train-classifier = "maize.classifier:main"
+maize-train-autoencoder = "maize.autoencoder:main"
+maize-evaluate = "maize.evaluate:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

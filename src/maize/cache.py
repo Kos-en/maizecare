@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from .preprocess import prepare
+from maize.preprocess import prepare
 
 
 class ArrayFile:

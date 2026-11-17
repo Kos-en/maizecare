@@ -8,6 +8,8 @@ channels. The bottleneck holds 8 x 8 x 32 = 2,048 numbers for a 128 x 128 x 3 = 
 Background (outside the leaf mask) is set to 0 at the input and ignored by the loss and the error,
 so only leaf tissue counts. A diseased leaf reconstructs badly; evaluate.py turns its error into a
 0-1 severity score.
+
+    maize-train-autoencoder ROOT MODELS     -> MODELS/ae/
 """
 from __future__ import annotations
 
@@ -22,13 +24,14 @@ import numpy as np
 import pandas as pd
 from keras import layers
 
-from .batches import SEED, Batches
-from .cache import load
-from .data import HEALTHY, select
-from .preprocess import AE_SIZE, mask_background, reconstruction_error
+from maize.batches import SEED, Batches
+from maize.cache import load
+from maize.pipeline import HEALTHY, command_args, load_usable_manifest, select
+from maize.preprocess import AE_SIZE, mask_background, reconstruction_error
 
 LATENT = 32       # bottleneck channels
 MIN_LEAF = 0.10   # healthy training images with less leaf than this (no leaf found) are skipped
+EPOCHS = 30       # early stopping usually ends sooner
 MODEL_FILE = "autoencoder.keras"
 
 
@@ -106,7 +109,7 @@ class Autoencoder:
         self.model.export(str(folder / "model.onnx"), format="onnx")
 
 
-def train(df: pd.DataFrame, root: Path, out: Path, epochs: int) -> None:
+def train(df: pd.DataFrame, root: Path, out: Path, epochs: int = EPOCHS) -> None:
     """Healthy train leaves for training, healthy val leaves for early stopping. Writes to out/."""
     images, masks = load(select(df, HEALTHY, "train"), root, AE_SIZE)
     has_leaf = masks.mean(axis=(1, 2)) >= MIN_LEAF
@@ -118,3 +121,8 @@ def train(df: pd.DataFrame, root: Path, out: Path, epochs: int) -> None:
     history = autoencoder.fit((images[has_leaf], masks[has_leaf]), val, epochs)
     autoencoder.save(out)
     history.to_csv(out / "history.csv", index=False)
+
+
+def main():
+    root, out = (Path(a) for a in command_args("maize-train-autoencoder DATA_ROOT MODELS", required=2)[:2])
+    train(load_usable_manifest(root), root, out / "ae")

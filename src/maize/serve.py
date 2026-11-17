@@ -6,7 +6,7 @@ GET /health, POST /api/score (image -> disease label + confidence, 0-1 severity)
 Stage 1 is the Keras classifier (classifier.onnx), stage 2 the healthy-only autoencoder (model.onnx).
 Photos are processed in memory, never stored. With no model files the app still starts
 and /api/score returns 503, so a first deploy works. Heat maps are for developers only
-(maize evaluate); see docs/observability.md.
+(maize-evaluate); see docs/observability.md.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from .preprocess import (AE_SIZE, CLS_SIZE, decode, leaf_fraction, mask_background, prepare, reconstruction_error,
+from maize.preprocess import (AE_SIZE, CLS_SIZE, decode, leaf_fraction, mask_background, prepare, reconstruction_error,
                          resize)
 
 log = logging.getLogger("maize.serve")
