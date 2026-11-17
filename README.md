@@ -8,15 +8,12 @@ Two Keras models behind one web app for farmers (English and Kiswahili), followi
 
 ```
 src/maize/
-  pipeline.py     the data pipeline (DataPipeline) and the manifest it writes    (no torch)
-  preprocess.py   photo -> model input + leaf mask, shared by training and the web app
-  cache.py        resized images and leaf masks, cached once per size
+  preprocess.py   one photo -> model input + leaf mask; shared by training and the web app
+  pipeline.py     the data pipeline (DataPipeline), the manifest and the image cache   (no torch)
   classifier.py   stage 1: Keras CNN, 4 backbones compared, exported to ONNX
   autoencoder.py  stage 2: masked Keras autoencoder, exported to ONNX
-  batches.py      feeds cached images to Keras
-  evaluate.py     calibrate the severity score on val, report on test
-  severity.py     symptomatic area A(x), the reference the score is checked against
-  serve.py        FastAPI app: /api/score + the built frontend                      (no torch)
+  evaluate.py     severity score calibrated on val, checked on test against A(x)
+  serve.py        FastAPI app: /api/score + the built frontend                         (no torch)
 frontend/         plain TypeScript UI, compiled to static files
 ```
 

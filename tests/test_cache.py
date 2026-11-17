@@ -4,7 +4,7 @@ import pytest
 
 cv2 = pytest.importorskip("cv2")
 pytest.importorskip("tqdm")
-from maize.cache import load_images
+from maize.pipeline import load_images
 from maize.preprocess import resize
 
 
@@ -37,7 +37,7 @@ def test_second_call_does_not_read_images_and_new_images_are_added(tmp_path):
 
 
 def test_masks_are_cached_with_the_same_keys(tmp_path):
-    from maize.cache import load, load_masks
+    from maize.pipeline import load, load_masks
     from maize.preprocess import prepare
     rows = make_rows(tmp_path, [1, 2])
     images, masks = load(rows, tmp_path, 128)
@@ -51,7 +51,7 @@ def test_masks_are_cached_with_the_same_keys(tmp_path):
 
 
 def test_photo_missing_from_the_mask_cache_is_redone(tmp_path):
-    from maize.cache import load
+    from maize.pipeline import load
     rows = make_rows(tmp_path, [1, 2])
     images, masks = load(rows, tmp_path, 128)
     (tmp_path / "mask_128.npz").unlink()               # e.g. an image cache from before masks existed

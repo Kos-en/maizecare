@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from maize.evaluate import auroc, calibrate, score
+from maize.evaluate import auroc, calibrate, score, symptomatic_area
 
 
 def errors(healthy, diseased):
@@ -69,3 +69,23 @@ def test_report_has_scores_baselines_and_mask_checks():
     assert results["diseases"]["MSV"]["n"] == 20
     assert set(results["baselines"]["MSV"]) == {"colour_distance"}   # no classifier given
     assert results["doubtful_mask_share"] == {"Healthy": 0.0, "MSV": 0.05}
+
+
+# ---- symptomatic area A(x) ----
+GREEN, YELLOW, BROWN = (60, 160, 50), (220, 200, 40), (130, 70, 20)
+
+
+def test_area_is_the_share_of_the_leaf_with_symptoms():
+    leaf = np.full((10, 10, 3), GREEN, np.uint8)
+    leaf[:2] = YELLOW               # 20 of 100 pixels yellow
+    leaf[2:3] = BROWN               # 10 brown
+    assert symptomatic_area(leaf, np.ones((10, 10), np.uint8)) == pytest.approx(30)
+
+
+def test_pixels_outside_the_mask_do_not_count():
+    image = np.full((10, 10, 3), BROWN, np.uint8)
+    image[:, :5] = GREEN
+    mask = np.zeros((10, 10), np.uint8)
+    mask[:, :5] = 1                 # only the green half is leaf
+    assert symptomatic_area(image, mask) == 0
+    assert symptomatic_area(image, np.zeros((10, 10), np.uint8)) == 0   # no leaf at all

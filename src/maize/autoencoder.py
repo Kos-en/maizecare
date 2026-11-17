@@ -24,14 +24,13 @@ import numpy as np
 import pandas as pd
 from keras import layers
 
-from maize.batches import SEED, Batches
-from maize.cache import load
-from maize.pipeline import HEALTHY, command_args, load_usable_manifest, select
+from maize.pipeline import HEALTHY, command_args, load, load_usable_manifest, select
 from maize.preprocess import AE_SIZE, mask_background, reconstruction_error
 
 LATENT = 32       # bottleneck channels
 MIN_LEAF = 0.10   # healthy training images with less leaf than this (no leaf found) are skipped
 EPOCHS = 30       # early stopping usually ends sooner
+SEED = 42
 MODEL_FILE = "autoencoder.keras"
 
 
@@ -81,13 +80,14 @@ class Autoencoder:
 
     def fit(self, train: tuple[np.ndarray, np.ndarray], val: tuple[np.ndarray, np.ndarray], epochs: int,
             batch_size: int = 64) -> pd.DataFrame:
-        """train, val: (images, masks). Early stopping on val loss keeps the best epoch."""
-        def batches(images, masks, shuffle):
-            return Batches(mask_background(images, masks), training_targets(images, masks), batch_size, shuffle)
+        """train, val: (images, masks). Early stopping on val loss keeps the best epoch.
+        Healthy leaves at 128 px are small enough to pass to Keras as plain arrays."""
+        def inputs_and_targets(images, masks):
+            return mask_background(images, masks).astype("float32"), training_targets(images, masks)
 
         stop = keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)
-        history = self.model.fit(batches(*train, shuffle=True), validation_data=batches(*val, shuffle=False),
-                                 epochs=epochs, callbacks=[stop], verbose=2)
+        history = self.model.fit(*inputs_and_targets(*train), validation_data=inputs_and_targets(*val),
+                                 batch_size=batch_size, epochs=epochs, callbacks=[stop], verbose=2)
         return pd.DataFrame(history.history)
 
     def reconstruct(self, images: np.ndarray, masks: np.ndarray) -> np.ndarray:

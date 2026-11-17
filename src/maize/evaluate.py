@@ -5,12 +5,16 @@
     grades: per disease, the tertiles of training scores split mild / moderate / severe
 
 Reported on test, per disease: AUROC healthy vs disease, and agreement of the score with the
-symptomatic area A(x) (severity.py) as Spearman rho and MAE after scaling both to 0-1. Two simple
+symptomatic area A(x) as Spearman rho and MAE after scaling both to 0-1. Two simple
 baselines get the same Spearman, so the autoencoder has something to beat:
     classifier   1 - P(healthy) from the chosen classifier (if one was trained)
     colour       mean colour distance of the leaf pixels from the average healthy training leaf
 Also: false-high rate on healthy leaves, score spread inside near-copy groups (stability), and per
 class the share of leaf masks flagged as doubtful (leaf fraction < 0.10 or > 0.95).
+
+Symptomatic area (proposal eq. 3.3): A(x) = 100 * |S| / |M|, M = leaf pixels, S = leaf pixels in a symptom
+colour range. It is the reference the score is checked against, never used to train anything. The
+colour ranges were set before any autoencoder score was seen and must not be tuned on them.
 
     maize-evaluate ROOT MODELS [CLASSIFIER_DIR]     -> MODELS/ae/calibration.json, metrics.json, figures
         CLASSIFIER_DIR (e.g. MODELS/clf_mobilenet_v2) adds the classifier baseline
@@ -20,16 +24,39 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pandas as pd
 from scipy.stats import mannwhitneyu, spearmanr
 
-from maize.cache import load
-from maize.pipeline import HEALTHY, command_args, data_version, load_usable_manifest, select
+from maize.pipeline import HEALTHY, command_args, data_version, load, load_usable_manifest, select
 from maize.preprocess import AE_SIZE, CLS_SIZE, mask_background
-from maize.severity import symptomatic_area
 
 MASK_OK = (0.10, 0.95)  # leaf fraction outside this range: the mask is doubtful
+
+# Symptom colours for A(x), fixed before any autoencoder score was seen. OpenCV HSV: hue 0-179
+# (degrees / 2), saturation and value 0-255. Healthy green is hue ~35-85.
+SYMPTOM_RANGES = {
+    "yellowing": ((20, 60, 80), (34, 255, 255)),     # chlorosis: yellow, saturated, fairly bright
+    "brown lesion": ((5, 50, 30), (19, 255, 200)),   # necrosis: orange-brown to dark brown
+    "dead tissue": ((10, 0, 120), (30, 60, 255)),    # dried, straw-coloured tissue: pale, low saturation
+}
+
+
+# ---- symptomatic area A(x) -----------------------------------------------------------------------
+def symptom_pixels(rgb: np.ndarray) -> np.ndarray:
+    """True where a pixel falls in any symptom colour range. rgb: H x W x 3 uint8."""
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    found = np.zeros(rgb.shape[:2], bool)
+    for low, high in SYMPTOM_RANGES.values():
+        found |= cv2.inRange(hsv, low, high) > 0
+    return found
+
+
+def symptomatic_area(rgb: np.ndarray, mask: np.ndarray) -> float:
+    """A(x) in percent (0-100): symptom pixels inside the leaf / leaf pixels."""
+    leaf = mask > 0
+    return float(100 * (symptom_pixels(rgb) & leaf).sum() / max(leaf.sum(), 1))
 
 
 # ---- the score -----------------------------------------------------------------------------------

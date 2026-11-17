@@ -18,6 +18,7 @@ import os
 os.environ.setdefault("KERAS_BACKEND", "torch")
 
 import json
+import math
 from pathlib import Path
 
 import keras
@@ -26,9 +27,7 @@ import pandas as pd
 from keras import layers
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
-from maize.batches import SEED, Batches
-from maize.cache import load_images
-from maize.pipeline import command_args, load_usable_manifest, select
+from maize.pipeline import command_args, load_images, load_usable_manifest, select
 from maize.preprocess import CLS_SIZE
 
 # name -> (constructor, input preprocessing; None = the backbone does its own)
@@ -41,7 +40,30 @@ BACKBONES = {
 MIN_CONFIDENCE = 0.6  # below this the app asks for a better photo instead of guessing
 UNFREEZE = 40         # backbone layers fine-tuned in phase 2
 EPOCHS = 10           # per phase; early stopping usually ends sooner
+SEED = 42             # same seed for every backbone, so results can be repeated
 PHASES = (("head", 1e-3, 0), ("finetune", 1e-5, UNFREEZE))  # (name, learning rate, layers unfrozen)
+
+
+class Batches(keras.utils.PyDataset):
+    """Feeds uint8 images (N, 224, 224, 3) and class numbers (N,) to Keras one float32 batch at a time,
+    so the whole dataset (several GB) never sits in memory as floats."""
+
+    def __init__(self, x: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool):
+        super().__init__()
+        self.x, self.y, self.batch_size, self.shuffle = x, y, batch_size, shuffle
+        self.order = np.arange(len(x))
+        self.on_epoch_end()
+
+    def __len__(self):
+        return math.ceil(len(self.x) / self.batch_size)
+
+    def __getitem__(self, i):
+        idx = self.order[i * self.batch_size:(i + 1) * self.batch_size]
+        return self.x[idx].astype("float32"), self.y[idx]
+
+    def on_epoch_end(self):
+        if self.shuffle:
+            np.random.shuffle(self.order)
 
 
 def build(backbone: str, n_classes: int, weights: str | None = "imagenet") -> tuple[keras.Model, keras.Model]:

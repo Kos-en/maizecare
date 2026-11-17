@@ -10,8 +10,7 @@ pytest.importorskip("keras")
 pytest.importorskip("sklearn")
 ort = pytest.importorskip("onnxruntime")
 
-from maize.batches import Batches
-from maize.classifier import Classifier, class_weights
+from maize.classifier import Batches, Classifier, class_weights
 
 
 def run_onnx(path, x):

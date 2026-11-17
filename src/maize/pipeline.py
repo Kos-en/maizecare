@@ -8,7 +8,9 @@ before any training.
   3. Conflicts a group holding two classes is dropped whole (label_conflict); exact copies keep one (duplicate_exact)
   4. Split     whole groups, stratified by class: within each class, groups in a fixed (hash) order fill
                test, then val, then train until each holds 15% / 15% / 70% of that class's images
-  5. Cache     each usable image resized to 128 and 224 px, with its leaf mask (preprocess.prepare)
+  5. Cache     each usable image resized to 128 and 224 px, with its leaf mask (preprocess.prepare), in
+               ROOT/cache_<size>.npz and ROOT/mask_<size>.npz keyed by sha1. Training reads these with
+               load(), so photos are never re-read. If you change preprocess.py, delete the cache files.
 
 Re-run after adding photos: only the new files are read. Steps 2-4 are redone on the whole dataset,
 so the result never depends on the order images arrived (adding photos can move groups between
@@ -23,9 +25,11 @@ import hashlib
 import io
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
+import cv2
 import imagehash
 import numpy as np
 import pandas as pd
@@ -34,8 +38,7 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from tqdm import tqdm
 
-from maize.cache import load
-from maize.preprocess import AE_SIZE, CLS_SIZE
+from maize.preprocess import AE_SIZE, CLS_SIZE, prepare
 
 HEALTHY = "Healthy"
 COLUMNS = ["path", "label", "sha1", "phash", "ahash", "group", "split", "status", "added_at"]
@@ -94,51 +97,9 @@ def command_args(usage: str, required: int) -> list[str]:
     return args
 
 
-# ---- helpers for one image / one comparison -----------------------------------------------------
-def inspect(path: Path) -> dict:
-    """Content hash, perceptual hashes and file-check status of one image."""
-    try:
-        data = path.read_bytes()
-        with Image.open(io.BytesIO(data)) as im:
-            im.load()
-            status = "ok" if min(im.size) >= MIN_SIDE else "too_small"
-            return {"sha1": hashlib.sha1(data).hexdigest(), "phash": str(imagehash.phash(im)),
-                    "ahash": str(imagehash.average_hash(im)), "status": status}
-    except Exception:
-        return {"sha1": "", "phash": "", "ahash": "", "status": "bad_image"}
-
-
-def popcount(x: np.ndarray) -> np.ndarray:
-    """Number of 1-bits in each uint64 (the Hamming distance, when x is an XOR of two hashes)."""
-    bits_in_byte = np.array([bin(i).count("1") for i in range(256)], np.uint8)
-    return bits_in_byte[x.view(np.uint8).reshape(*x.shape, 8)].sum(-1)
-
-
-def near_pairs(df: pd.DataFrame, hamming: int = HAMMING, chunk: int = 512) -> np.ndarray:
-    """Row-position pairs (i, j), i < j, of images that are near copies of each other."""
-    ph = np.array([int(h, 16) for h in df["phash"]], np.uint64)
-    ah = np.array([int(h, 16) for h in df["ahash"]], np.uint64)
-    pairs = [np.empty((0, 2), np.int64)]
-    for start in range(0, len(df), chunk):  # compare a chunk of images against all images
-        dist = np.minimum(popcount(ph[start:start + chunk, None] ^ ph), popcount(ah[start:start + chunk, None] ^ ah))
-        i, j = np.nonzero(dist <= hamming)
-        i += start
-        pairs.append(np.stack([i, j], axis=1)[i < j])
-    return np.concatenate(pairs)
-
-
-def split_for(share_before: float) -> str:
-    """Split of a group, from the share of its class's images placed before it."""
-    if share_before < TEST_FRAC:
-        return "test"
-    if share_before < TEST_FRAC + VAL_FRAC:
-        return "val"
-    return "train"
-
-
 # ---- the pipeline -------------------------------------------------------------------------------
 class DataPipeline:
-    """Runs the steps above in order on raw/<Class>/ images, keeping the manifest in self.df."""
+    """Runs the steps in the module docstring in order on raw/<Class>/ images, keeping the manifest in self.df."""
 
     def __init__(self, raw: Path, root: Path, hamming: int = HAMMING):
         self.raw, self.root, self.hamming = Path(raw), Path(root), hamming
@@ -239,6 +200,108 @@ class DataPipeline:
         print("5 largest near-copy groups (a huge one means chains joined unrelated photos):")
         print(largest.nlargest(5, "images").to_string())
         print(f"\nLeak check: {self.count_leaks()} near-copy pairs cross splits (must be 0).")
+
+
+# ---- steps 1-4: helpers ------------------------------------------------------------------------
+def inspect(path: Path) -> dict:
+    """Content hash, perceptual hashes and file-check status of one image."""
+    try:
+        data = path.read_bytes()
+        with Image.open(io.BytesIO(data)) as im:
+            im.load()
+            status = "ok" if min(im.size) >= MIN_SIDE else "too_small"
+            return {"sha1": hashlib.sha1(data).hexdigest(), "phash": str(imagehash.phash(im)),
+                    "ahash": str(imagehash.average_hash(im)), "status": status}
+    except Exception:
+        return {"sha1": "", "phash": "", "ahash": "", "status": "bad_image"}
+
+
+def popcount(x: np.ndarray) -> np.ndarray:
+    """Number of 1-bits in each uint64 (the Hamming distance, when x is an XOR of two hashes)."""
+    bits_in_byte = np.array([bin(i).count("1") for i in range(256)], np.uint8)
+    return bits_in_byte[x.view(np.uint8).reshape(*x.shape, 8)].sum(-1)
+
+
+def near_pairs(df: pd.DataFrame, hamming: int = HAMMING, chunk: int = 512) -> np.ndarray:
+    """Row-position pairs (i, j), i < j, of images that are near copies of each other."""
+    ph = np.array([int(h, 16) for h in df["phash"]], np.uint64)
+    ah = np.array([int(h, 16) for h in df["ahash"]], np.uint64)
+    pairs = [np.empty((0, 2), np.int64)]
+    for start in range(0, len(df), chunk):  # compare a chunk of images against all images
+        dist = np.minimum(popcount(ph[start:start + chunk, None] ^ ph), popcount(ah[start:start + chunk, None] ^ ah))
+        i, j = np.nonzero(dist <= hamming)
+        i += start
+        pairs.append(np.stack([i, j], axis=1)[i < j])
+    return np.concatenate(pairs)
+
+
+def split_for(share_before: float) -> str:
+    """Split of a group, from the share of its class's images placed before it."""
+    if share_before < TEST_FRAC:
+        return "test"
+    if share_before < TEST_FRAC + VAL_FRAC:
+        return "val"
+    return "train"
+
+
+# ---- step 5: the image + leaf mask cache, also read by training ----------------------------------
+class ArrayFile:
+    """One .npz cache: arrays keyed by sha1, loaded into memory, saved atomically."""
+
+    def __init__(self, path: Path, item_shape: tuple):
+        self.path = path
+        self.keys, self.arrays = [], np.zeros((0, *item_shape), np.uint8)
+        if path.exists():
+            with np.load(path) as z:
+                self.keys, self.arrays = list(z["sha1"]), z["x"]
+
+    def replace(self, keys: list[str], arrays: np.ndarray) -> None:
+        """Add these entries, dropping any older entry with the same key, and save."""
+        keep = ~np.isin(self.keys, keys)
+        self.keys = [k for k, kept in zip(self.keys, keep) if kept] + list(keys)
+        self.arrays = np.concatenate([self.arrays[keep], arrays])
+        tmp = self.path.with_name(self.path.stem + ".tmp.npz")  # write then rename: a crash cannot corrupt it
+        np.savez(tmp, sha1=np.array(self.keys), x=self.arrays)
+        os.replace(tmp, self.path)
+
+    def get(self, keys: pd.Series) -> np.ndarray:
+        position = {k: i for i, k in enumerate(self.keys)}
+        return self.arrays[[position[k] for k in keys]]
+
+
+def read_photo(path: str, size: int) -> tuple[np.ndarray, np.ndarray]:
+    bgr = cv2.imread(path)
+    if bgr is None:
+        raise FileNotFoundError(f"Could not read {path}")
+    return prepare(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), size)
+
+
+def load(rows: pd.DataFrame, root: Path, size: int, workers: int = 8) -> tuple[np.ndarray, np.ndarray]:
+    """(images, masks) for the manifest rows, in the same order. Reads only photos missing from either cache."""
+    images = ArrayFile(Path(root) / f"cache_{size}.npz", (size, size, 3))
+    masks = ArrayFile(Path(root) / f"mask_{size}.npz", (size, size))
+
+    missing = rows[~rows["sha1"].isin(set(images.keys) & set(masks.keys))].drop_duplicates("sha1")
+    if len(missing):
+        new_images = np.empty((len(missing), size, size, 3), np.uint8)
+        new_masks = np.empty((len(missing), size, size), np.uint8)
+        paths = [str(Path(root) / p) for p in missing["path"]]
+        with ThreadPoolExecutor(workers) as pool:
+            done = pool.map(lambda p: read_photo(p, size), paths)
+            for i, (image, mask) in enumerate(tqdm(done, total=len(paths), desc=f"caching {size}px")):
+                new_images[i], new_masks[i] = image, mask
+        images.replace(list(missing["sha1"]), new_images)
+        masks.replace(list(missing["sha1"]), new_masks)
+
+    return images.get(rows["sha1"]), masks.get(rows["sha1"])
+
+
+def load_images(rows: pd.DataFrame, root: Path, size: int) -> np.ndarray:
+    return load(rows, root, size)[0]
+
+
+def load_masks(rows: pd.DataFrame, root: Path, size: int) -> np.ndarray:
+    return load(rows, root, size)[1]
 
 
 def main():
