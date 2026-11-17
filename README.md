@@ -3,69 +3,84 @@
 Two Keras models behind one web app for farmers (English and Kiswahili), following the proposal:
 1. **Classifier** (ImageNet backbone, transfer learning): Healthy / MLB / MLND / MSV, with a confidence so
    unclear photos get "please retake" instead of a guess.
-2. **Autoencoder** trained on Healthy leaves only. Its reconstruction error on a diseased leaf is the
-   severity signal, so no severity labels are needed.
+2. **Autoencoder** trained on healthy leaves only, inside the leaf mask. Its reconstruction error on a
+   diseased leaf is the severity signal, so no severity labels are needed.
 
 ```
 src/maize/
-  pipeline.py     the `maize` command: runs every step, or one step
-  data.py         step 1: check, group, split the images -> manifest.csv          (no torch)
-  models.py       steps 2-3: classifier and autoencoder (Keras), exported to ONNX
-  evaluate.py     step 4: calibrate the severity score on val, report on test
-  severity.py     the notebook's colour formula, used as the reference index
-  cache.py        resized images cached in one file per size
-  preprocess.py   photo -> model input, shared by training and the web app
-  serve.py        FastAPI app: /api/score + the built frontend                    (no torch)
+  cli.py          the `maize` command
+  data.py         check, group and split the images -> manifest.csv                (no torch)
+  preprocess.py   photo -> model input + leaf mask, shared by training and the web app
+  cache.py        resized images and leaf masks, cached once per size
+  classifier.py   stage 1: Keras CNN, 4 backbones compared, exported to ONNX
+  autoencoder.py  stage 2: masked Keras autoencoder, exported to ONNX
+  batches.py      feeds cached images to Keras
+  evaluate.py     calibrate the severity score on val, report on test
+  severity.py     symptomatic area A(x), the reference the score is checked against
+  serve.py        FastAPI app: /api/score + the built frontend                      (no torch)
 frontend/         plain TypeScript UI, compiled to static files
 ```
 
-## The pipeline
+## The data pipeline: `maize prepare`
+
+Every image goes through this before any training, and new photos get exactly the same treatment.
 
 ```bash
-maize all --raw RAW --data-root ROOT --out MODELS     # everything, in order (GPU)
-maize prepare --raw RAW --data-root ROOT              # only the data step (CPU is enough)
-maize classifier --data-root ROOT --out MODELS --backbones mobilenet_v2   # any single step
+maize prepare --raw RAW --data-root ROOT      # RAW/<Class>/*.jpg; re-run after adding photos
 ```
-
-| step | what it does | writes |
-|---|---|---|
-| `prepare` | file check, near-copy groups, drop mixed-label groups, split | `ROOT/manifest.csv` |
-| `classifier` | trains each backbone (head, then fine-tune), compares them | `MODELS/classifiers.csv`, `MODELS/clf_<backbone>/` |
-| `autoencoder` | trains on healthy train leaves | `MODELS/ae/` |
-| `evaluate` | calibrates the 0-1 score on val; AUROC, false-high rate, Spearman on test | `MODELS/ae/calibration.json`, `metrics.json`, `scores.csv`, figures |
-| `release` | best classifier (by val macro-F1) + autoencoder + calibration | `MODELS/release/` |
-
-`maize --help` lists the options (backbones, epochs).
-
-### The data step (proposal 3.3-3.4)
 1. **File check**: opens as JPEG/PNG and the shortest side is at least 50 px, else `bad_image` / `too_small`.
 2. **Near copies**: min(pHash, aHash) Hamming distance <= 6. Chains of near copies form one group.
 3. **Mixed labels**: a group holding two classes is dropped whole (`label_conflict`).
 4. **Exact copies**: same file contents, keep one (`duplicate_exact`).
-5. **Split by group**: 15% test, 15% val, 70% train, from the group's hash, so a group lands in the
-   same split on every run and near copies can never be on both sides. A leak check confirms it.
+5. **Split by group, stratified by class**: within each class the groups are put in a fixed (hash) order
+   and filled into test, val and train until each holds 15% / 15% / 70% of that class. Near copies can
+   never be on both sides; a leak check confirms it. The report also lists the largest groups.
+6. **Resize and leaf mask** (proposal 3.4): scale the longest side to 128 / 224 px and pad with black;
+   find the leaf with Excess Green + Otsu, add yellow/brown tissue touching it, close, fill holes, keep
+   the largest region. Images and masks are cached in `ROOT/cache_<size>.npz` and `ROOT/mask_<size>.npz`.
 
 Only new files are read (the slow part); steps 2-5 are redone on the whole dataset every run, so the
-result does not depend on the order images arrived. Unusable images stay in the manifest with a status.
+result does not depend on the order images arrived. Adding photos can move groups between splits, so
+retrain after adding data. Unusable images stay in the manifest with a status.
+
+## Training and evaluation
+
+```bash
+maize classifier  --data-root ROOT --out MODELS     # 4 backbones, or --backbones mobilenet_v2
+maize autoencoder --data-root ROOT --out MODELS     # healthy train leaves, inside the leaf mask
+maize evaluate    --data-root ROOT --out MODELS --classifier MODELS/clf_<best backbone>
+```
+- **Classifier**: head, then fine-tune; class weights; blur / noise / brightness augmentation (no hue);
+  keeps the epoch with the best val macro-F1. `MODELS/classifiers.csv` compares the backbones: pick the
+  best on val, report its test scores.
+- **Autoencoder**: 4 stride-2 blocks (32 -> 256 filters) and a 1x1 bottleneck to 32 channels (24x
+  compression); background set to 0 and ignored by the loss.
+- **Evaluate**: score `s = clip((e - healthy median) / (diseased p99 - healthy median), 0, 1)` on val,
+  grades from per-disease tertiles. On test, per disease: AUROC vs healthy, Spearman and scaled MAE of
+  the score against A(x), and the same Spearman for two baselines (1 - P(healthy) from the classifier,
+  colour distance from the average healthy leaf). Writes `calibration.json`, `metrics.json`,
+  `test_scores.csv`, `error_by_class.png`, `heatmaps.png` to `MODELS/ae/`.
+
+`maize --help` lists every option.
 
 ## Colab
 
-Data, caches and models live on Drive, so a dead session loses nothing: rerun the remaining steps.
-Use a GPU runtime (L4) for `maize all`; `maize prepare` alone runs fine on CPU.
+Data, caches and models live on Drive, so a dead session loses nothing.
 
 ```bash
-cd /content && git clone https://github.com/Kos-en/maizecare repo && cd repo
-pip install -q --no-deps -e . && pip install -q imagehash onnx onnxscript   # Colab has torch, keras, sklearn
-D=/content/drive/MyDrive
-nohup maize all --raw $D/cv_datasets_cleaned --data-root $D --out $D/maize_models > $D/pipeline.log 2>&1 &
-tail -f $D/pipeline.log
+cd /content && git clone -b mask-and-severity https://github.com/Kos-en/maizecare repo && cd repo
+pip install -q --no-deps -e . && pip install -q imagehash onnx onnxscript onnxruntime
+export KERAS_BACKEND=torch D=/content/drive/MyDrive M=/content/drive/MyDrive/maize_models
+maize prepare --raw $D/cv_datasets_cleaned --data-root $D        # CPU is enough
+nohup sh -c "maize classifier --data-root $D --out $M && maize autoencoder --data-root $D --out $M" \
+  > $D/train.log 2>&1 &                                          # GPU (L4)
+maize evaluate --data-root $D --out $M --classifier $M/clf_<best backbone>
 ```
-The first run builds the image caches (`cache_224.npz`, `cache_128.npz`) once; later runs load them in seconds.
 
 ## Web app
 
 ```
-make release       # copies MODELS/release/* into release/ (small; commit them)
+make release CLF=clf_<best backbone>   # copies the 4 files the app needs into release/ (commit them)
 make serve         # builds the frontend, serves http://localhost:8000
 make docker        # the same in the production container
 ```
@@ -99,5 +114,6 @@ One-time setup on Render (free plan):
 Free instances sleep after 15 min idle (first request takes about a minute). Photos are never stored.
 
 ## Not built yet
-From the proposal: leaf masking, VAE and SSIM-loss autoencoder variants, 5-fold cross-validation,
-blurred / low-light test copies, Grad-CAM, TFLite quantisation, and the monitoring in docs/observability.md.
+From the proposal: VAE and SSIM-loss autoencoder variants, 5-fold cross-validation, blurred / low-light
+test copies, Grad-CAM, TFLite quantisation, IoU of the leaf mask against hand-drawn masks, and the
+monitoring in docs/observability.md.

@@ -1,20 +1,22 @@
 import numpy as np
 import pytest
 
-cv2 = pytest.importorskip("cv2")
-from maize.severity import SEVERITY_WEIGHTS, extract_quick_features, formula_severity
+from maize.severity import symptomatic_area
+
+GREEN, YELLOW, BROWN = (60, 160, 50), (220, 200, 40), (130, 70, 20)
 
 
-def test_features_cover_all_weights_and_score_is_bounded(tmp_path):
-    green, brown = np.zeros((64, 64, 3), np.uint8), np.zeros((64, 64, 3), np.uint8)
-    green[...] = (40, 160, 50)[::-1]   # BGR green
-    brown[...] = (20, 60, 120)         # BGR brown
-    scores = []
-    for name, img in (("green", green), ("brown", brown)):
-        p = tmp_path / f"{name}.png"
-        cv2.imwrite(str(p), img)
-        feats = extract_quick_features(p)
-        assert set(SEVERITY_WEIGHTS) <= set(feats)
-        scores.append(formula_severity(feats))
-    assert all(0 <= s <= 1 for s in scores)
-    assert scores[1] > scores[0], "a brown leaf must score as more severe than a green one"
+def test_area_is_the_share_of_the_leaf_with_symptoms():
+    leaf = np.full((10, 10, 3), GREEN, np.uint8)
+    leaf[:2] = YELLOW               # 20 of 100 pixels yellow
+    leaf[2:3] = BROWN               # 10 brown
+    assert symptomatic_area(leaf, np.ones((10, 10), np.uint8)) == pytest.approx(30)
+
+
+def test_pixels_outside_the_mask_do_not_count():
+    image = np.full((10, 10, 3), BROWN, np.uint8)
+    image[:, :5] = GREEN
+    mask = np.zeros((10, 10), np.uint8)
+    mask[:, :5] = 1                 # only the green half is leaf
+    assert symptomatic_area(image, mask) == 0
+    assert symptomatic_area(image, np.zeros((10, 10), np.uint8)) == 0   # no leaf at all

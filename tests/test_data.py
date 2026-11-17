@@ -20,36 +20,46 @@ def manifest(*images):
 # ---- cleaning rules on made-up hashes -----------------------------------------------------------
 def test_chain_of_near_copies_is_one_group_in_one_split():
     a, b, c = 0, (1 << 5) - 1, (1 << 10) - 1  # a-b and b-c are 5 bits apart, a-c is 10
-    df = clean(manifest(("Healthy", a, None), ("Healthy", b, None), ("Healthy", c, None), ("Healthy", FAR, None)))
+    df, _ = clean(manifest(("Healthy", a, None), ("Healthy", b, None), ("Healthy", c, None), ("Healthy", FAR, None)))
     assert df["group"].nunique() == 2
     assert df["group"][0] == df["group"][2]
     assert df.groupby("group")["split"].nunique().max() == 1
 
 
 def test_group_with_two_labels_is_dropped_whole():
-    df = clean(manifest(("MSV", 0, None), ("MLND", 0b11, None), ("MLND", FAR, None)))
+    df, _ = clean(manifest(("MSV", 0, None), ("MLND", 0b11, None), ("MLND", FAR, None)))
     assert list(df["status"]) == ["label_conflict", "label_conflict", "ok"]
 
 
 def test_exact_copy_keeps_one():
-    df = clean(manifest(("Healthy", 0, "ab"), ("Healthy", 0, "ab")))
+    df, _ = clean(manifest(("Healthy", 0, "ab"), ("Healthy", 0, "ab")))
     assert list(df["status"]) == ["ok", "duplicate_exact"]
 
 
 def test_file_faults_stay_and_old_statuses_are_recomputed():
     df = manifest(("Healthy", 0, None), ("Healthy", FAR, None)).assign(status=["bad_image", "split_conflict"])
-    df = clean(df)
+    df, _ = clean(df)
     assert list(df["status"]) == ["bad_image", "ok"]
     assert list(df["split"]) == ["", df["split"][1]] and df["split"][1] in {"train", "val", "test"}
 
 
-def test_split_sizes_and_no_leaks():
+def test_near_copies_never_cross_splits():
     hashes = np.random.default_rng(0).integers(0, 2 ** 63, 3000)
     images = [("Healthy", int(h), None) for h in hashes] + [("Healthy", int(h) ^ 1, None) for h in hashes[:300]]
-    df = clean(manifest(*images))
-    share = df["split"].value_counts(normalize=True)
-    assert abs(share["test"] - 0.15) < 0.03 and abs(share["val"] - 0.15) < 0.03
-    assert count_leaks(df) == 0
+    df, pairs = clean(manifest(*images))
+    assert len(pairs) == 300 and count_leaks(df, pairs) == 0
+
+
+def test_split_is_stratified_by_class_and_repeatable():
+    rng = np.random.default_rng(0)
+    images = [(label, int(h), None) for label, n in (("Healthy", 2000), ("MSV", 300))
+              for h in rng.integers(0, 2 ** 63, n)]
+    df, _ = clean(manifest(*images))
+    share = df.groupby("label")["split"].value_counts(normalize=True)
+    for label in ("Healthy", "MSV"):   # each class on its own gets ~15 / 15 / 70
+        assert abs(share[label, "test"] - 0.15) < 0.01 and abs(share[label, "val"] - 0.15) < 0.01
+    again, _ = clean(manifest(*images))
+    assert (again["split"] == df["split"]).all()
 
 
 # ---- end to end on real image files -------------------------------------------------------------
@@ -76,7 +86,7 @@ def test_prepare_end_to_end_and_rerun_changes_nothing(tmp_path):
     save(raw, "Healthy", "tiny.png", Image.new("RGB", (20, 20)))
     (raw / "Healthy" / "corrupt.png").write_bytes(b"not an image")
 
-    df = prepare(raw, root)
+    df, _ = prepare(raw, root)
     status = {Path(p).name: s for p, s in zip(df["path"], df["status"])}
     assert sorted([status["h0.png"], status["copy_of_h0.png"]]) == ["duplicate_exact", "ok"]
     assert status["h1.png"] == status["h1_again.png"] == "label_conflict"

@@ -2,20 +2,20 @@
 RAW ?= data/raw
 DATA ?= data
 MODELS ?= models
+CLF ?= clf_mobilenet_v2
 
-.PHONY: install data all release frontend serve docker test lock
+.PHONY: install data release frontend serve docker test lock
 
 install:                             # everything except torch (Colab has it; add ,train elsewhere)
 	pip install -e ".[data,serve]" --group dev
 
-data:                                # clean, group and split the images (CPU; safe to re-run)
+data:                                # the data pipeline: check, group, split, cache images + leaf masks
 	maize prepare --raw $(RAW) --data-root $(DATA)
 
-all:                                 # the whole pipeline: data -> classifier -> autoencoder -> evaluate -> release
-	maize all --raw $(RAW) --data-root $(DATA) --out $(MODELS)
-
-release:                             # copy the trained files the web app ships with (commit them)
-	mkdir -p release && cp $(MODELS)/release/* release/
+release:                             # copy the 4 files the web app ships with (commit them)
+	mkdir -p release
+	cp $(MODELS)/$(CLF)/classifier.onnx $(MODELS)/$(CLF)/classifier.json release/
+	cp $(MODELS)/ae/model.onnx $(MODELS)/ae/calibration.json release/
 
 frontend:                            # compile TypeScript -> frontend/dist
 	cd frontend && npm ci --ignore-scripts && npm run build

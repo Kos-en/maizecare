@@ -8,7 +8,9 @@ the order images arrived.
   2. Near copies    min(pHash, aHash) Hamming distance <= 6; chains of near copies form one group
   3. Mixed labels   a group holding two classes is dropped whole     label_conflict
   4. Exact copies   same file contents: keep one                     duplicate_exact
-  5. Split          whole groups, from the group's hash: 15% test, 15% val, 70% train
+  5. Split          whole groups, stratified by class: within each class the groups are put in a fixed
+                    order (by their hash) and filled into test, then val, then train until each holds
+                    15% / 15% / 70% of that class's images
 
 Only rows with status "ok" are used for training and evaluation.
 """
@@ -133,51 +135,61 @@ def group_ids(n: int, pairs: np.ndarray) -> np.ndarray:
     return connected_components(graph, directed=False)[1]
 
 
-def split_of(sha1: str) -> str:
-    """Split from a hash, so a group lands in the same split on every run."""
-    u = int(sha1[:8], 16) / 16 ** 8  # uniform in [0, 1)
-    if u < TEST_FRAC:
+def split_for(share_before: float) -> str:
+    """Split of a group, from the share of its class's images placed before it."""
+    if share_before < TEST_FRAC:
         return "test"
-    if u < TEST_FRAC + VAL_FRAC:
+    if share_before < TEST_FRAC + VAL_FRAC:
         return "val"
     return "train"
 
 
-def clean(df: pd.DataFrame, hamming: int = HAMMING) -> pd.DataFrame:
-    """Steps 2-5 on the whole manifest: recompute group, status and split for every row."""
+def assign_splits(usable: pd.DataFrame) -> pd.Series:
+    """Split per row: whole groups, stratified by class, in a fixed order so every run gives the same answer."""
+    groups = usable.groupby("group").agg(label=("label", "first"), key=("sha1", "min"), size=("sha1", "size"))
+    groups = groups.sort_values(["label", "key"])  # the hash order is effectively random but fixed
+    placed_before = groups.groupby("label")["size"].cumsum() - groups["size"]
+    share_before = placed_before / groups.groupby("label")["size"].transform("sum")
+    return usable["group"].map(share_before.map(split_for))
+
+
+def clean(df: pd.DataFrame, hamming: int = HAMMING) -> tuple[pd.DataFrame, np.ndarray]:
+    """Steps 2-5 on the whole manifest: recompute group, status and split for every row.
+    Returns the manifest and the near-copy pairs (row numbers), which the leak check reuses."""
     df = df.sort_values("path", ignore_index=True)
     df["status"] = df["status"].where(df["status"].isin(FILE_FAULTS), "ok")
 
     readable = df.index[df["status"] == "ok"]
+    pairs = near_pairs(df.loc[readable], hamming)
     df["group"] = -1
-    df.loc[readable, "group"] = group_ids(len(readable), near_pairs(df.loc[readable], hamming))
+    df.loc[readable, "group"] = group_ids(len(readable), pairs)
 
     labels_in_group = df.loc[readable].groupby("group")["label"].transform("nunique")
     df.loc[labels_in_group[labels_in_group > 1].index, "status"] = "label_conflict"
     df.loc[(df["status"] == "ok") & df.duplicated("sha1"), "status"] = "duplicate_exact"
 
     usable = df["status"] == "ok"
-    group_key = df[usable].groupby("group")["sha1"].transform("min")  # one hash per group
     df["split"] = ""
-    df.loc[usable, "split"] = group_key.map(split_of)
-    return df
+    df.loc[usable, "split"] = assign_splits(df[usable])
+    return df, readable.to_numpy()[pairs]
 
 
-def prepare(raw: Path, root: Path, hamming: int = HAMMING) -> pd.DataFrame:
-    df = clean(scan(Path(raw), Path(root)), hamming)
+def prepare(raw: Path, root: Path, hamming: int = HAMMING) -> tuple[pd.DataFrame, np.ndarray]:
+    df, pairs = clean(scan(Path(raw), Path(root)), hamming)
     save_manifest(df, root)
-    return df
+    return df, pairs
 
 
-def count_leaks(df: pd.DataFrame, hamming: int = HAMMING) -> int:
-    """Near-copy pairs of usable images that sit in different splits. Must be 0."""
-    ok = select(df)
-    pairs = near_pairs(ok, hamming)
-    split = ok["split"].to_numpy()
-    return int((split[pairs[:, 0]] != split[pairs[:, 1]]).sum())
+def count_leaks(df: pd.DataFrame, pairs: np.ndarray) -> int:
+    """Near-copy pairs of usable images that sit in different splits. Must be 0.
+    pairs: row numbers from clean() (so the slow comparison of every image runs only once)."""
+    usable = (df["status"] == "ok").to_numpy()
+    both_usable = pairs[usable[pairs[:, 0]] & usable[pairs[:, 1]]]
+    split = df["split"].to_numpy()
+    return int((split[both_usable[:, 0]] != split[both_usable[:, 1]]).sum())
 
 
-def report(df: pd.DataFrame) -> None:
+def report(df: pd.DataFrame, pairs: np.ndarray) -> None:
     print("\nImages by class and status:")
     print(df.groupby(["label", "status"]).size().unstack(fill_value=0))
     ok = select(df)
@@ -185,4 +197,9 @@ def report(df: pd.DataFrame) -> None:
     table["groups"] = ok.groupby("label")["group"].nunique()
     print("\nUsable images by class and split:")
     print(table)
-    print(f"\nLeak check: {count_leaks(df)} near-copy pairs cross splits (must be 0).")
+    print(f"\nImages dropped as label_conflict: {int((df['status'] == 'label_conflict').sum())}")
+    groups = df[df["group"] >= 0].groupby("group")
+    largest = pd.DataFrame({"images": groups.size(), "classes": groups["label"].unique().map(", ".join)})
+    print("5 largest near-copy groups (a huge one means chains joined unrelated photos):")
+    print(largest.nlargest(5, "images").to_string())
+    print(f"\nLeak check: {count_leaks(df, pairs)} near-copy pairs cross splits (must be 0).")

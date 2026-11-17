@@ -22,7 +22,8 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from .preprocess import AE_SIZE, CLS_SIZE, decode, resize
+from .preprocess import (AE_SIZE, CLS_SIZE, decode, leaf_fraction, mask_background, prepare, reconstruction_error,
+                         resize)
 
 log = logging.getLogger("maize.serve")
 MAX_UPLOAD = 10 * 1024 * 1024
@@ -40,7 +41,8 @@ def onnx_runner(path: Path) -> Run:
 
 class Scorer:
     """classify: (1,224,224,3) RGB 0-255 -> class probabilities.
-    reconstruct: (1,128,128,3) RGB 0-255 -> its reconstruction in 0-1 by the healthy-only autoencoder."""
+    reconstruct: (1,128,128,3) leaf-masked RGB 0-255 -> its reconstruction in 0-1 by the healthy-only autoencoder.
+    The error is measured inside the leaf mask, with the same functions used in training."""
 
     def __init__(self, classify: Run, reconstruct: Run, classes: dict, calibration: dict):
         self.classify, self.reconstruct = classify, reconstruct
@@ -55,8 +57,10 @@ class Scorer:
     def score(self, rgb: np.ndarray) -> dict:
         probs = self.classify(resize(rgb, CLS_SIZE)[None].astype(np.float32))[0]
         top = int(probs.argmax())
-        x = resize(rgb, AE_SIZE)[None].astype(np.float32)
-        e = float(((x / 255.0 - self.reconstruct(x)) ** 2).mean())
+        image, mask = prepare(rgb, AE_SIZE)
+        images, masks = image[None], mask[None]
+        recons = self.reconstruct(mask_background(images, masks).astype(np.float32))
+        e = float(reconstruction_error(images, recons, masks)[0])
         med, p99 = self.cal["e_healthy_median"], self.cal["e_disease_p99"]
         return {
             "label": self.labels[top],
@@ -66,6 +70,7 @@ class Scorer:
             "error": e,
             "score": float(min(1.0, max(0.0, (e - med) / (p99 - med)))),
             "within_healthy_range": bool(e <= self.cal["e_healthy_p95"]),
+            "leaf_fraction": leaf_fraction(mask),
             "model_version": self.cal.get("data_version"),
         }
 

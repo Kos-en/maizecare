@@ -1,50 +1,33 @@
-"""Formula severity from OpenCV colour features (from the notebook). Only used to cross-check the
-autoencoder score, not as ground truth."""
+"""Symptomatic area A(x) (proposal 3.6, eq. 3.3): the share of the leaf that shows symptoms.
+
+    A(x) = 100 * |S| / |M|    M = leaf pixels (the leaf mask), S = leaf pixels in a symptom colour range
+
+A(x) is the reference the autoencoder score is checked against; it is never used to train anything.
+The colour ranges below were set before any autoencoder score was seen and must not be tuned on them.
+"""
 from __future__ import annotations
 
 import cv2
 import numpy as np
 
-SEVERITY_WEIGHTS = {
-    "Necrotic_Area": 0.20, "Chlorosis_Intensity": 0.15, "Texture_Roughness": 0.10,
-    "Chloro_x_Necrotic": 0.10, "Visual_Distress": 0.10, "Infected_Distribution": 0.10,
-    "Lesion_Distribution": 0.05, "Patchiness": 0.05, "Green_Yellow_Ratio": -0.15,
+# OpenCV HSV: hue 0-179 (degrees / 2), saturation and value 0-255. Healthy green is hue ~35-85.
+SYMPTOM_RANGES = {
+    "yellowing": ((20, 60, 80), (34, 255, 255)),     # chlorosis: yellow, saturated, fairly bright
+    "brown lesion": ((5, 50, 30), (19, 255, 200)),   # necrosis: orange-brown to dark brown
+    "dead tissue": ((10, 0, 120), (30, 60, 255)),    # dried, straw-coloured tissue: pale, low saturation
 }
 
 
-def extract_quick_features(image_path) -> dict:
-    img = cv2.imread(str(image_path))
-    if img is None:
-        raise FileNotFoundError(f"Could not read {image_path}")
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    total_px = gray.shape[0] * gray.shape[1]
-
-    green_mask = cv2.inRange(hsv, (35, 40, 40), (85, 255, 255))
-    yellow_mask = cv2.inRange(hsv, (15, 50, 50), (35, 255, 255))
-    necro_mask = cv2.inRange(hsv, (0, 10, 10), (20, 200, 200))
-
-    green_frac = cv2.countNonZero(green_mask) / total_px
-    yellow_frac = cv2.countNonZero(yellow_mask) / total_px
-    necro_frac = cv2.countNonZero(necro_mask) / total_px
-    roughness = cv2.Laplacian(gray, cv2.CV_64F).var()
-
-    ch_v = np.clip(yellow_frac, 0, 1)
-    gy_v = np.clip((green_frac / (yellow_frac + 1e-6)) / 10.0, 0, 1)
-    ne_v = np.clip(necro_frac, 0, 1)
-    ro_v = np.clip(roughness / 5000.0, 0, 1)
-
-    return {
-        "Necrotic_Area": ne_v, "Chlorosis_Intensity": ch_v, "Texture_Roughness": ro_v,
-        "Chloro_x_Necrotic": ch_v * ne_v, "Visual_Distress": (ne_v + ch_v + (1 - gy_v)) / 3.0,
-        "Infected_Distribution": ne_v, "Lesion_Distribution": ne_v, "Patchiness": ne_v,
-        "Green_Yellow_Ratio": gy_v,
-    }
+def symptom_pixels(rgb: np.ndarray) -> np.ndarray:
+    """True where a pixel falls in any symptom colour range. rgb: H x W x 3 uint8."""
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    found = np.zeros(rgb.shape[:2], bool)
+    for low, high in SYMPTOM_RANGES.values():
+        found |= cv2.inRange(hsv, low, high) > 0
+    return found
 
 
-def formula_severity(feats: dict) -> float:
-    score = 0.0
-    for feat, w in SEVERITY_WEIGHTS.items():
-        val = feats[feat]
-        score += abs(w) * (1 - val) if w < 0 else w * val
-    return float(np.clip(score, 0, 1))
+def symptomatic_area(rgb: np.ndarray, mask: np.ndarray) -> float:
+    """A(x) in percent (0-100): symptom pixels inside the leaf / leaf pixels."""
+    leaf = mask > 0
+    return float(100 * (symptom_pixels(rgb) & leaf).sum() / max(leaf.sum(), 1))

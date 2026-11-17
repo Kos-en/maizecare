@@ -17,8 +17,11 @@ def jpeg(rgb):
     return cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))[1].tobytes()
 
 
-def leaf(h=300, w=200, color=(40, 160, 50)):
-    return np.full((h, w, 3), color, np.uint8)
+def leaf(h=300, w=200):
+    """A green leaf on brown soil, so the leaf mask finds it."""
+    img = np.full((h, w, 3), (120, 80, 40), np.uint8)
+    cv2.ellipse(img, (w // 2, h // 2), (w // 3, h // 3), 0, 0, 360, (40, 160, 50), -1)
+    return img
 
 
 def scorer(factor, probs=(0.1, 0.1, 0.1, 0.7)):
@@ -31,9 +34,10 @@ def scorer(factor, probs=(0.1, 0.1, 0.1, 0.7)):
 def test_scorer_output_shape_and_ranges():
     r = scorer(0.9).score(leaf())
     assert set(r) == {"label", "confidence", "confident", "probabilities", "error", "score",
-                      "within_healthy_range", "model_version"}
+                      "within_healthy_range", "leaf_fraction", "model_version"}
     assert r["label"] == "MSV" and r["confident"] and r["confidence"] == pytest.approx(0.7)
     assert 0 <= r["score"] <= 1 and r["error"] >= 0 and r["model_version"] == "abc123"
+    assert 0.10 < r["leaf_fraction"] < 0.95
 
 
 def test_low_confidence_is_flagged():

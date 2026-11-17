@@ -33,3 +33,39 @@ def test_refuses_a_model_that_does_not_separate_healthy_from_diseased():
 def test_auroc():
     assert auroc(pd.Series([0.1, 0.2]), pd.Series([0.3, 0.4])) == 1.0
     assert auroc(pd.Series([0.3, 0.4]), pd.Series([0.1, 0.2])) == 0.0
+
+
+def test_scaled_mae_ignores_units():
+    from maize.evaluate import scaled_mae
+    assert scaled_mae(pd.Series([0, 1, 2]), pd.Series([0, 50, 100])) == pytest.approx(0)
+    assert scaled_mae(pd.Series([0, 1]), pd.Series([1, 0])) == pytest.approx(1)
+
+
+def test_colour_distance_counts_leaf_pixels_only():
+    from maize.evaluate import colour_distance, mean_leaf_colour
+    images = np.zeros((1, 4, 4, 3), np.uint8)
+    images[0, :2] = (30, 40, 0)                 # leaf: 50 away from black
+    images[0, 2:] = (255, 255, 255)             # background: ignored
+    masks = np.zeros((1, 4, 4), np.uint8)
+    masks[0, :2] = 1
+    assert colour_distance(images, masks, np.zeros(3))[0] == pytest.approx(50)
+    assert mean_leaf_colour(images, masks).tolist() == [30, 40, 0]
+
+
+def test_report_has_scores_baselines_and_mask_checks():
+    from maize.evaluate import report
+    rng = np.random.default_rng(0)
+    n = 40
+    test = pd.DataFrame({
+        "label": ["Healthy"] * 20 + ["MSV"] * 20, "split": "test", "group": np.arange(n) // 2,
+        "error": np.r_[rng.uniform(0, 1, 20), rng.uniform(1, 3, 20)],
+        "leaf_fraction": [0.5] * 39 + [0.02],
+        "area": np.r_[np.zeros(20), np.linspace(0, 60, 20)],
+        "colour_distance": rng.random(n), "p_diseased": np.nan,
+    })
+    test["score"] = test["error"] / 3
+    results = report(test, test, {"e_healthy_p95": 0.9})
+    assert results["diseases"]["MSV"]["auroc_vs_healthy"] == 1.0
+    assert results["diseases"]["MSV"]["n"] == 20
+    assert set(results["baselines"]["MSV"]) == {"colour_distance"}   # no classifier given
+    assert results["doubtful_mask_share"] == {"Healthy": 0.0, "MSV": 0.05}

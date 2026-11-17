@@ -875,7 +875,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.120,<1" },
     { name = "imagehash", marker = "extra == 'data'" },
-    { name = "keras", marker = "extra == 'train'", specifier = ">=3.8" },
+    { name = "keras", marker = "extra == 'train'", specifier = ">=3.10" },
     { name = "maize", extras = ["data"], marker = "extra == 'train'" },
     { name = "matplotlib", marker = "extra == 'train'" },
     { name = "numpy", specifier = "<3" },
