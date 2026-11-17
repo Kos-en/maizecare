@@ -25,7 +25,8 @@ Every image goes through this before any training, and new photos get exactly th
 maize-prepare RAW ROOT       # RAW/<Class>/*.jpg; re-run after adding photos
 ```
 1. **File check**: opens as JPEG/PNG and the shortest side is at least 50 px, else `bad_image` / `too_small`.
-2. **Near copies**: min(pHash, aHash) Hamming distance <= 6. Chains of near copies form one group.
+2. **Near copies**: within 6 bits on **both** pHash and aHash. Chains of near copies form one group.
+   (Either hash alone chained 18,624 unrelated photos into one group on the real data.)
 3. **Mixed labels**: a group holding two classes is dropped whole (`label_conflict`).
 4. **Exact copies**: same file contents, keep one (`duplicate_exact`).
 5. **Split by group, stratified by class**: within each class the groups are put in a fixed (hash) order

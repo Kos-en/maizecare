@@ -4,7 +4,10 @@ before any training.
     maize-prepare RAW ROOT        RAW/<Class>/*.jpg in, ROOT/manifest.csv and image caches out
 
   1. Read      new files only: content hash, perceptual hashes; must open and be >= 50 px   else bad_image / too_small
-  2. Group     min(pHash, aHash) Hamming distance <= 6 is a near copy; chains of near copies form one group
+  2. Group     a near copy is within 6 bits on BOTH pHash and aHash; chains of near copies form one group.
+               (Either hash alone chained 18,624 unrelated photos into one group on the real data, because
+               aHash only sees rough brightness layout. With both required: largest group 9 photos, and
+               cut-offs 2-6 give almost the same pairs, 5,171-5,293.)
   3. Conflicts a group holding two classes is dropped whole (label_conflict); exact copies keep one (duplicate_exact)
   4. Split     whole groups, stratified by class: within each class, groups in a fixed (hash) order fill
                test, then val, then train until each holds 15% / 15% / 70% of that class's images
@@ -45,7 +48,7 @@ COLUMNS = ["path", "label", "sha1", "phash", "ahash", "group", "split", "status"
 IMAGE_TYPES = {".jpg", ".jpeg", ".png"}
 FILE_FAULTS = ["bad_image", "too_small"]  # facts about the file itself; every other status is recomputed
 MIN_SIDE = 50
-HAMMING = 6
+HAMMING = 6  # bits, on both hashes
 TEST_FRAC = 0.15
 VAL_FRAC = 0.15
 SAVE_EVERY = 1000  # save while reading, so an interrupted run resumes instead of starting over
@@ -223,12 +226,12 @@ def popcount(x: np.ndarray) -> np.ndarray:
 
 
 def near_pairs(df: pd.DataFrame, hamming: int = HAMMING, chunk: int = 512) -> np.ndarray:
-    """Row-position pairs (i, j), i < j, of images that are near copies of each other."""
+    """Row-position pairs (i, j), i < j, of near copies: within `hamming` bits on both pHash and aHash."""
     ph = np.array([int(h, 16) for h in df["phash"]], np.uint64)
     ah = np.array([int(h, 16) for h in df["ahash"]], np.uint64)
     pairs = [np.empty((0, 2), np.int64)]
     for start in range(0, len(df), chunk):  # compare a chunk of images against all images
-        dist = np.minimum(popcount(ph[start:start + chunk, None] ^ ph), popcount(ah[start:start + chunk, None] ^ ah))
+        dist = np.maximum(popcount(ph[start:start + chunk, None] ^ ph), popcount(ah[start:start + chunk, None] ^ ah))
         i, j = np.nonzero(dist <= hamming)
         i += start
         pairs.append(np.stack([i, j], axis=1)[i < j])

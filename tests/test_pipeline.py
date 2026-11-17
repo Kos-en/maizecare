@@ -34,6 +34,14 @@ def test_chain_of_near_copies_is_one_group_in_one_split():
     assert df.groupby("group")["split"].nunique().max() == 1
 
 
+def test_close_on_one_hash_only_is_not_a_near_copy():
+    rows = manifest(("Healthy", 0, None), ("MSV", 0, None), ("Healthy", FAR, None))
+    rows.loc[1, "phash"] = f"{FAR:016x}"   # same rough brightness layout (aHash), different picture (pHash)
+    df = cleaned(rows).df
+    assert df["group"][0] != df["group"][1]
+    assert list(df["status"]) == ["ok", "ok", "ok"]
+
+
 def test_group_with_two_labels_is_dropped_whole():
     df = cleaned(manifest(("MSV", 0, None), ("MLND", 0b11, None), ("MLND", FAR, None))).df
     assert list(df["status"]) == ["label_conflict", "label_conflict", "ok"]
