@@ -33,8 +33,10 @@ maize-prepare RAW ROOT       # RAW/<Class>/*.jpg; re-run after adding photos
    and filled into test, val and train until each holds 15% / 15% / 70% of that class. Near copies can
    never be on both sides; a leak check confirms it. The report also lists the largest groups.
 6. **Resize and leaf mask** (proposal 3.4): scale the longest side to 128 / 224 px and pad with black;
-   find the leaf with Excess Green + Otsu, add yellow/brown tissue touching it, close, fill holes, keep
-   the largest region. Images and masks are cached in `ROOT/cache_<size>.npz` and `ROOT/mask_<size>.npz`.
+   find the leaf with GrabCut grown out from the middle of the photo (the farmer aims at the leaf), keep
+   the piece holding the middle, fill holes. Colour rules (Excess Green) were tried first and failed on
+   field photos: the background is other leaves and weeds, and a yellowed leaf is less green than the weeds.
+   Images and masks are cached in `ROOT/cache_<size>.npz` and `ROOT/mask_v<version>_<size>.npz`.
 
 Only new files are read (the slow part); steps 2-5 are redone on the whole dataset every run, so the
 result does not depend on the order images arrived. Adding photos can move groups between splits, so

@@ -68,3 +68,25 @@ def test_smoothing_does_not_mix_in_the_background():
     masks[:, :, :10] = 1
     blurred = blur_inside(image, masks, 4.0)
     assert np.allclose(blurred[0, :, :10], 0.8, atol=1e-4)   # the leaf edge does not fade towards black
+
+
+def test_a_yellowed_leaf_on_green_weeds_is_found():
+    """The case colour rules get backwards: the diseased leaf is less green than the weeds behind it."""
+    rng = np.random.default_rng(0)
+    img = np.clip(rng.normal((50, 120, 40), 25, (160, 120, 3)), 0, 255).astype(np.uint8)   # weeds
+    cv2.ellipse(img, (60, 80), (25, 70), 0, 0, 360, (200, 180, 60), -1)                    # yellowed leaf
+    mask = leaf_mask(img)
+    assert mask[80, 60] == 1 and mask[30, 60] == 1 and mask[80, 10] == 0 and mask[80, 110] == 0
+
+
+def test_a_leaf_at_the_edge_is_not_the_photographed_one():
+    img = np.full((120, 200, 3), SOIL, np.uint8)
+    cv2.ellipse(img, (100, 60), (40, 20), 0, 0, 360, GREEN, -1)   # the photographed leaf
+    cv2.rectangle(img, (0, 0), (40, 119), GREEN, -1)              # a bigger leaf cut by the frame
+    mask = leaf_mask(img)
+    assert mask[60, 100] == 1 and mask[60, 10] == 0
+
+
+def test_the_same_photo_always_gets_the_same_mask():
+    img = leaf_photo()
+    assert (leaf_mask(img) == leaf_mask(img.copy())).all()

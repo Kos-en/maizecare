@@ -13,12 +13,13 @@ import numpy as np
 CLS_SIZE = 224  # classifier input (ImageNet backbones)
 AE_SIZE = 128   # autoencoder input
 
-# Yellow-to-brown tissue (chlorosis, lesions) that may belong to the leaf. OpenCV hue runs 0-179,
-# so 5-35 is roughly 10-70 degrees: orange-brown through yellow. Low saturation/value is soil or shadow.
-LESION_HSV_LOW = (5, 40, 30)
-LESION_HSV_HIGH = (35, 255, 255)
-TOUCH_KERNEL = 7  # lesion pixels this close to green tissue count as leaf
-CLOSE_KERNEL = 5  # closes small gaps along the leaf edge
+# Leaf mask (proposal 3.4): GrabCut (Rother et al. 2004) grown out from the middle of the photo, because
+# the farmer aims the camera at the leaf. Colour rules (Excess Green) cannot do this: the background is
+# often other green leaves and weeds, and a yellowed diseased leaf is less green than the weeds around it.
+SEED_FRACTION = 0.12     # an ellipse this share of the width/height around the middle is leaf for sure
+LIKELY_FRACTION = 0.30   # a larger ellipse starts as "probably leaf"; everything else as "probably background"
+GRABCUT_ITERATIONS = 10
+MASK_VERSION = 2         # bump when leaf_mask changes, so cached masks are recomputed
 MASK_OK = (0.10, 0.95)  # leaf fraction outside this range: no leaf found, or the background was kept
 
 # How the autoencoder's error is measured (proposal eq. 3.2), by name -> blur in pixels at AE_SIZE.
@@ -64,17 +65,6 @@ def _ellipse(k: int) -> np.ndarray:
     return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
 
 
-def green_mask(rgb: np.ndarray) -> np.ndarray:
-    """Excess Green on chromatic coordinates (ExG = 2g - r - b), thresholded with Otsu. 0/1."""
-    f = rgb.astype(np.float32)
-    total = f.sum(axis=-1) + 1e-6
-    r, g, b = f[..., 0] / total, f[..., 1] / total, f[..., 2] / total
-    exg = 2 * g - r - b                                             # between -1 and 2
-    exg8 = np.clip((exg + 1) / 3 * 255, 0, 255).astype(np.uint8)
-    _, mask = cv2.threshold(exg8, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    return mask
-
-
 def fill_holes(mask: np.ndarray) -> np.ndarray:
     """Background not reachable from the border is a hole in the leaf (e.g. a lesion): fill it."""
     padded = np.pad(mask, 1)  # a background frame, so the flood always starts outside the leaf
@@ -84,22 +74,39 @@ def fill_holes(mask: np.ndarray) -> np.ndarray:
     return (padded | holes)[1:-1, 1:-1].astype(np.uint8)
 
 
-def largest_component(mask: np.ndarray) -> np.ndarray:
+def central_component(mask: np.ndarray) -> np.ndarray:
+    """The connected piece that holds the middle of the image (or, if none does, the largest)."""
     n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     if n <= 1:  # nothing found
         return mask
-    biggest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-    return (labels == biggest).astype(np.uint8)
+    middle = labels[mask.shape[0] // 2, mask.shape[1] // 2]
+    keep = middle if middle else 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    return (labels == keep).astype(np.uint8)
+
+
+def _centre_ellipse(labels: np.ndarray, fraction: float, value: int) -> None:
+    h, w = labels.shape
+    axes = (max(1, int(w * fraction)), max(1, int(h * fraction)))
+    cv2.ellipse(labels, (w // 2, h // 2), axes, 0, 0, 360, value, -1)
+
+
+def grabcut_from_centre(rgb: np.ndarray) -> np.ndarray:
+    """GrabCut learns a colour model of the leaf from the middle and of the background from the rest,
+    then moves the boundary to where the colours change most. 0/1."""
+    labels = np.full(rgb.shape[:2], cv2.GC_PR_BGD, np.uint8)
+    _centre_ellipse(labels, LIKELY_FRACTION, cv2.GC_PR_FGD)
+    _centre_ellipse(labels, SEED_FRACTION, cv2.GC_FGD)
+    cv2.setRNGSeed(0)  # GrabCut starts from k-means: same photo, same mask (training, app, any thread)
+    cv2.grabCut(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), labels, None, np.zeros((1, 65)), np.zeros((1, 65)),
+                GRABCUT_ITERATIONS, cv2.GC_INIT_WITH_MASK)
+    return np.isin(labels, (cv2.GC_FGD, cv2.GC_PR_FGD)).astype(np.uint8)
 
 
 def leaf_mask(rgb: np.ndarray) -> np.ndarray:
-    """Leaf pixels (uint8 0/1, same H x W): green tissue plus yellow/brown tissue touching it (proposal 3.4)."""
-    green = green_mask(rgb)
-    lesion = (cv2.inRange(cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV), LESION_HSV_LOW, LESION_HSV_HIGH) > 0).astype(np.uint8)
-    near_green = cv2.dilate(green, _ellipse(TOUCH_KERNEL))
-    mask = green | (lesion & near_green)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, _ellipse(CLOSE_KERNEL))
-    return largest_component(fill_holes(mask))
+    """The photographed leaf (uint8 0/1, same H x W): GrabCut from the middle, specks removed, the piece
+    holding the middle kept, holes (e.g. lesions GrabCut left out) filled."""
+    mask = cv2.morphologyEx(grabcut_from_centre(rgb), cv2.MORPH_OPEN, _ellipse(3))
+    return fill_holes(central_component(mask))
 
 
 def leaf_fraction(mask: np.ndarray) -> float:

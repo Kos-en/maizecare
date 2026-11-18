@@ -119,6 +119,6 @@ def test_run_also_caches_images_and_leaf_masks(tmp_path):
     for i in range(6):
         save(raw, "Healthy", f"h{i}.png", blob(i))
     DataPipeline(raw, root).run()
-    for name in ("cache_128.npz", "mask_128.npz", "cache_224.npz", "mask_224.npz"):
+    for name in ("cache_128.npz", "mask_v2_128.npz", "cache_224.npz", "mask_v2_224.npz"):
         with np.load(root / name) as z:
             assert len(z["sha1"]) == 6

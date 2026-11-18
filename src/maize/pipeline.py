@@ -12,7 +12,7 @@ before any training.
   4. Split     whole groups, stratified by class: within each class, groups in a fixed (hash) order fill
                test, then val, then train until each holds 15% / 15% / 70% of that class's images
   5. Cache     each usable image resized to 128 and 224 px, with its leaf mask (preprocess.prepare), in
-               ROOT/cache_<size>.npz and ROOT/mask_<size>.npz keyed by sha1. Training reads these with
+               ROOT/cache_<size>.npz and ROOT/mask_v<version>_<size>.npz keyed by sha1. Training reads these with
                load(), so photos are never re-read. If you change preprocess.py, delete the cache files.
 
 Re-run after adding photos: only the new files are read. Steps 2-4 are redone on the whole dataset,
@@ -41,7 +41,7 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from tqdm import tqdm
 
-from maize.preprocess import AE_SIZE, CLS_SIZE, prepare
+from maize.preprocess import AE_SIZE, CLS_SIZE, MASK_VERSION, prepare
 
 HEALTHY = "Healthy"
 COLUMNS = ["path", "label", "sha1", "phash", "ahash", "group", "split", "status", "added_at"]
@@ -282,7 +282,7 @@ def read_photo(path: str, size: int) -> tuple[np.ndarray, np.ndarray]:
 def load(rows: pd.DataFrame, root: Path, size: int, workers: int = 8) -> tuple[np.ndarray, np.ndarray]:
     """(images, masks) for the manifest rows, in the same order. Reads only photos missing from either cache."""
     images = ArrayFile(Path(root) / f"cache_{size}.npz", (size, size, 3))
-    masks = ArrayFile(Path(root) / f"mask_{size}.npz", (size, size))
+    masks = ArrayFile(Path(root) / f"mask_v{MASK_VERSION}_{size}.npz", (size, size))  # new mask code, new file
 
     missing = rows[~rows["sha1"].isin(set(images.keys) & set(masks.keys))].drop_duplicates("sha1")
     if len(missing):
