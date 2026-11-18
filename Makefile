@@ -3,6 +3,7 @@ RAW ?= data/raw
 DATA ?= data
 MODELS ?= models
 CLF ?= clf_mobilenet_v2
+AE ?= ae_conv                        # the autoencoder maize-evaluate chose (top row of MODELS/autoencoders.csv)
 
 .PHONY: install data release frontend serve docker test lock
 
@@ -15,7 +16,7 @@ data:                                # the data pipeline: check, group, split, c
 release:                             # copy the 4 files the web app ships with (commit them)
 	mkdir -p release
 	cp $(MODELS)/$(CLF)/classifier.onnx $(MODELS)/$(CLF)/classifier.json release/
-	cp $(MODELS)/ae/model.onnx $(MODELS)/ae/calibration.json release/
+	cp $(MODELS)/$(AE)/model.onnx $(MODELS)/$(AE)/calibration.json release/
 
 frontend:                            # compile TypeScript -> frontend/dist
 	cd frontend && npm ci --ignore-scripts && npm run build

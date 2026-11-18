@@ -11,7 +11,7 @@ src/maize/
   preprocess.py   one photo -> model input + leaf mask; shared by training and the web app
   pipeline.py     the data pipeline (DataPipeline), the manifest and the image cache   (no torch)
   classifier.py   stage 1: Keras CNN, 4 backbones compared, exported to ONNX
-  autoencoder.py  stage 2: masked Keras autoencoder, exported to ONNX
+  autoencoder.py  stage 2: masked convolutional and variational autoencoders, exported to ONNX
   evaluate.py     severity score calibrated on val, checked on test against A(x)
   serve.py        FastAPI app: /api/score + the built frontend                         (no torch)
 frontend/         plain TypeScript UI, compiled to static files
@@ -44,19 +44,22 @@ retrain after adding data. Unusable images stay in the manifest with a status.
 
 ```bash
 maize-train-classifier  ROOT MODELS                  # all 4 backbones, or add e.g. mobilenet_v2
-maize-train-autoencoder ROOT MODELS                  # healthy train leaves, inside the leaf mask
+maize-train-autoencoder ROOT MODELS                  # conv + vae, or add e.g. vae
 maize-evaluate          ROOT MODELS MODELS/clf_<best backbone>
 ```
 - **Classifier**: head, then fine-tune; class weights; blur / noise / brightness augmentation (no hue);
   keeps the epoch with the best val macro-F1. `MODELS/classifiers.csv` compares the backbones: pick the
   best on val, report its test scores.
-- **Autoencoder**: 4 stride-2 blocks (32 -> 256 filters) and a 1x1 bottleneck to 32 channels (24x
-  compression); background set to 0 and ignored by the loss.
+- **Autoencoders**: a convolutional one and a VAE of the same shape: 4 stride-2 blocks (32 -> 256
+  filters) and a 1x1 code layer to 32 channels (24x compression); background set to 0 and ignored by
+  the loss. Trained on healthy train leaves only. `MODELS/autoencoders.csv` compares them by how well
+  their error separates healthy from each disease on val (AUROC); the top row is the one used.
 - **Evaluate**: score `s = clip((e - healthy median) / (diseased p99 - healthy median), 0, 1)` on val,
   grades from per-disease tertiles. On test, per disease: AUROC vs healthy, Spearman and scaled MAE of
   the score against A(x), and the same Spearman for two baselines (1 - P(healthy) from the classifier,
   colour distance from the average healthy leaf). Writes `calibration.json`, `metrics.json`,
-  `test_scores.csv`, `error_by_class.png`, `heatmaps.png` to `MODELS/ae/`.
+  `test_scores.csv`, `error_by_class.png`, `heatmaps.png` next to the chosen autoencoder
+  (`MODELS/ae_<kind>/`).
 
 Each command prints its usage line if run without arguments. The commands are declared in
 `pyproject.toml` (`[project.scripts]`), the same way Superset declares `superset`.
@@ -70,7 +73,7 @@ cd /content && git clone -b mask-and-severity https://github.com/Kos-en/maizecar
 pip install -q --no-deps -e . && pip install -q imagehash onnx onnxscript onnxruntime
 export KERAS_BACKEND=torch D=/content/drive/MyDrive M=/content/drive/MyDrive/maize_models
 maize-prepare $D/cv_datasets_cleaned $D                              # CPU is enough
-nohup sh -c "maize-train-classifier $D $M && maize-train-autoencoder $D $M" > $D/train.log 2>&1 &   # GPU (L4)
+nohup sh -c "maize-train-classifier $D $M; maize-train-autoencoder $D $M" > $D/train.log 2>&1 &   # GPU (L4)
 maize-evaluate $D $M $M/clf_<best backbone>          # after reading $M/classifiers.csv
 ```
 
@@ -111,6 +114,6 @@ One-time setup on Render (free plan):
 Free instances sleep after 15 min idle (first request takes about a minute). Photos are never stored.
 
 ## Not built yet
-From the proposal: VAE and SSIM-loss autoencoder variants, 5-fold cross-validation, blurred / low-light
-test copies, Grad-CAM, TFLite quantisation, IoU of the leaf mask against hand-drawn masks, and the
-monitoring in docs/observability.md.
+From the proposal: the data source per image (Tanzania / Uganda) and results per source, blurred /
+low-light test copies, bootstrap confidence intervals and McNemar's test, Grad-CAM, the target checks of
+section 3.2, the by-eye severity estimates, and the web app's quality gate, retake threshold and grades.

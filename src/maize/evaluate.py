@@ -16,7 +16,8 @@ Symptomatic area (proposal eq. 3.3): A(x) = 100 * |S| / |M|, M = leaf pixels, S 
 colour range. It is the reference the score is checked against, never used to train anything. The
 colour ranges were set before any autoencoder score was seen and must not be tuned on them.
 
-    maize-evaluate ROOT MODELS [CLASSIFIER_DIR]     -> MODELS/ae/calibration.json, metrics.json, figures
+    maize-evaluate ROOT MODELS [CLASSIFIER_DIR]     -> calibration.json, metrics.json, figures
+        written next to the chosen autoencoder (top row of MODELS/autoencoders.csv, e.g. MODELS/ae_vae/)
         CLASSIFIER_DIR (e.g. MODELS/clf_mobilenet_v2) adds the classifier baseline
 """
 from __future__ import annotations
@@ -219,6 +220,10 @@ def run(df: pd.DataFrame, root: Path, folder: Path, classifier_dir: Path | None 
 
 
 def main():
-    root, out, *classifier = command_args("maize-evaluate DATA_ROOT MODELS [CLASSIFIER_DIR]", required=2)
+    from maize.autoencoder import chosen
+
+    root, models, *classifier = command_args("maize-evaluate DATA_ROOT MODELS [CLASSIFIER_DIR]", required=2)
     classifier_dir = Path(classifier[0]) if classifier else None
-    run(load_usable_manifest(Path(root)), Path(root), Path(out) / "ae", classifier_dir)
+    folder = chosen(Path(models))
+    print(f"Evaluating {folder.name}: it separates healthy from diseased val leaves best.", flush=True)
+    run(load_usable_manifest(Path(root)), Path(root), folder, classifier_dir)

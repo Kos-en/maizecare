@@ -1,7 +1,9 @@
-"""The masked autoencoder on tiny random data. Needs keras + torch, so CI skips it."""
+"""The masked autoencoders on tiny random data. Needs keras + torch, so CI skips it."""
+import json
 import os
 
 import numpy as np
+import pandas as pd
 import pytest
 
 os.environ.setdefault("KERAS_BACKEND", "torch")
@@ -9,7 +11,7 @@ pytest.importorskip("torch")
 pytest.importorskip("keras")
 ort = pytest.importorskip("onnxruntime")
 
-from maize.autoencoder import Autoencoder, masked_loss, training_targets
+from maize.autoencoder import KINDS, Autoencoder, chosen, compare, masked_loss, separation, training_targets
 from maize.preprocess import mask_background, reconstruction_error
 
 
@@ -40,9 +42,10 @@ def test_error_matches_the_loss_and_counts_leaf_pixels_only():
     assert np.allclose(from_numpy, from_keras, atol=1e-5)
 
 
-def test_train_save_load_and_onnx_match(tmp_path):
+@pytest.mark.parametrize("kind", KINDS)
+def test_train_save_load_and_onnx_match(kind, tmp_path):
     images, masks = leaves()
-    autoencoder = Autoencoder.new()
+    autoencoder = Autoencoder.new(kind)
     history = autoencoder.fit((images, masks), (images, masks), epochs=1)
     assert "val_loss" in history
 
@@ -56,3 +59,44 @@ def test_train_save_load_and_onnx_match(tmp_path):
     session = ort.InferenceSession(str(tmp_path / "model.onnx"), providers=["CPUExecutionProvider"])
     onnx_recons = session.run(None, {session.get_inputs()[0].name: mask_background(images, masks).astype("float32")})[0]
     assert np.allclose(onnx_recons, recons, atol=1e-4)
+
+
+def test_vae_draws_and_adds_its_kl_penalty_only_while_training():
+    import keras
+    images, masks = leaves(2)
+    model = Autoencoder.new("vae").model
+    x = mask_background(images, masks).astype("float32")
+
+    def run(training):
+        return keras.ops.convert_to_numpy(model(x, training=training))
+
+    first, second = run(True), run(True)
+    assert len(model.losses) == 1                    # replaced each call, not piled up
+    assert not np.allclose(first, second)            # a new random draw each time
+
+    scored = run(False)
+    assert len(model.losses) == 0                    # scoring uses the mean: no penalty
+    assert np.allclose(scored, run(False))
+
+
+def test_separation_measures_each_disease_against_healthy():
+    labels = pd.Series(["Healthy"] * 3 + ["MSV"] * 3 + ["MLND"] * 3)
+    errors = pd.Series([0.1, 0.2, 0.3, 0.5, 0.6, 0.7, 0.2, 0.25, 0.3])
+    result = separation(labels, errors)
+    assert result["auroc_MSV"] == 1.0
+    assert result["auroc_MLND"] < 1.0
+    assert result["mean_auroc"] == pytest.approx((result["auroc_MSV"] + result["auroc_MLND"]) / 2)
+    assert result["healthy_median_error"] == pytest.approx(0.2)
+
+
+def test_the_best_separating_autoencoder_is_chosen(tmp_path):
+    for kind, mean_auroc in (("conv", 0.81), ("vae", 0.88)):
+        (tmp_path / f"ae_{kind}").mkdir()
+        (tmp_path / f"ae_{kind}" / "validation.json").write_text(json.dumps({"mean_auroc": mean_auroc}))
+    assert list(compare(tmp_path)["kind"]) == ["vae", "conv"]
+    assert chosen(tmp_path) == tmp_path / "ae_vae"
+
+
+def test_no_trained_autoencoder_is_a_clear_error(tmp_path):
+    with pytest.raises(SystemExit, match="maize-train-autoencoder"):
+        chosen(tmp_path)
