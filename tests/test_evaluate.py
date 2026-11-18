@@ -89,3 +89,16 @@ def test_pixels_outside_the_mask_do_not_count():
     mask[:, :5] = 1                 # only the green half is leaf
     assert symptomatic_area(image, mask) == 0
     assert symptomatic_area(image, np.zeros((10, 10), np.uint8)) == 0   # no leaf at all
+
+
+def test_onnx_batch_size_follows_the_exported_model():
+    from types import SimpleNamespace
+
+    from maize.evaluate import onnx_batch_size
+
+    def session(first_dim):
+        return SimpleNamespace(get_inputs=lambda: [SimpleNamespace(shape=[first_dim, 224, 224, 3])])
+
+    assert onnx_batch_size(session(1)) == 1              # exported for one image at a time
+    assert onnx_batch_size(session("batch")) == 64       # any number of images
+    assert onnx_batch_size(session(None)) == 64

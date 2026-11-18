@@ -111,12 +111,18 @@ def colour_distance(images: np.ndarray, masks: np.ndarray, reference: np.ndarray
     return distances.sum(axis=(1, 2)) / np.maximum(masks.sum(axis=(1, 2)), 1)
 
 
-def classifier_p_diseased(classifier_dir: Path, images: np.ndarray, chunk: int = 64) -> np.ndarray:
+def onnx_batch_size(session, default: int = 64) -> int:
+    """Images per call: some exports accept only a fixed number (often 1), others any number."""
+    first = session.get_inputs()[0].shape[0]
+    return first if isinstance(first, int) else default
+
+
+def classifier_p_diseased(classifier_dir: Path, images: np.ndarray) -> np.ndarray:
     """1 - P(healthy) per image from the exported classifier (the same ONNX file the web app runs)."""
     import onnxruntime as ort
     session = ort.InferenceSession(str(classifier_dir / "classifier.onnx"), providers=["CPUExecutionProvider"])
     labels = json.loads((classifier_dir / "classifier.json").read_text())["labels"]
-    name = session.get_inputs()[0].name
+    name, chunk = session.get_inputs()[0].name, onnx_batch_size(session)
     probs = [session.run(None, {name: images[i:i + chunk].astype(np.float32)})[0] for i in range(0, len(images), chunk)]
     return 1 - np.concatenate(probs)[:, labels.index(HEALTHY)]
 
