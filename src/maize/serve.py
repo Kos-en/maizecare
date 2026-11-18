@@ -60,7 +60,7 @@ class Scorer:
         image, mask = prepare(rgb, AE_SIZE)
         images, masks = image[None], mask[None]
         recons = self.reconstruct(mask_background(images, masks).astype(np.float32))
-        e = float(reconstruction_error(images, recons, masks)[0])
+        e = float(reconstruction_error(images, recons, masks, self.cal.get("smooth_sigma", 0.0))[0])  # as calibrated
         med, p99 = self.cal["e_healthy_median"], self.cal["e_disease_p99"]
         return {
             "label": self.labels[top],

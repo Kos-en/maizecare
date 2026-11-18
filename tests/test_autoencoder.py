@@ -89,12 +89,16 @@ def test_separation_measures_each_disease_against_healthy():
     assert result["healthy_median_error"] == pytest.approx(0.2)
 
 
-def test_the_best_separating_autoencoder_is_chosen(tmp_path):
-    for kind, mean_auroc in (("conv", 0.81), ("vae", 0.88)):
+def test_the_best_separating_autoencoder_and_error_are_chosen(tmp_path):
+    validation = {"conv": {"plain": 0.81, "smoothed": 0.90}, "vae": {"plain": 0.88, "smoothed": 0.84}}
+    for kind, by_error in validation.items():
         (tmp_path / f"ae_{kind}").mkdir()
-        (tmp_path / f"ae_{kind}" / "validation.json").write_text(json.dumps({"mean_auroc": mean_auroc}))
-    assert list(compare(tmp_path)["kind"]) == ["vae", "conv"]
-    assert chosen(tmp_path) == tmp_path / "ae_vae"
+        results = {error: {"mean_auroc": auc} for error, auc in by_error.items()}
+        (tmp_path / f"ae_{kind}" / "validation.json").write_text(json.dumps(results))
+    table = compare(tmp_path)
+    assert list(zip(table["kind"], table["error"])) == [
+        ("conv", "smoothed"), ("vae", "plain"), ("vae", "smoothed"), ("conv", "plain")]
+    assert chosen(tmp_path) == (tmp_path / "ae_conv", "smoothed")
 
 
 def test_no_trained_autoencoder_is_a_clear_error(tmp_path):

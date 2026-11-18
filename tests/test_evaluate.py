@@ -64,11 +64,12 @@ def test_report_has_scores_baselines_and_mask_checks():
         "colour_distance": rng.random(n), "p_diseased": np.nan,
     })
     test["score"] = test["error"] / 3
-    results = report(test, test, {"e_healthy_p95": 0.9})
+    results = report(test, {"e_healthy_p95": 0.9, "error": "smoothed"}, {"Healthy": 0.0, "MSV": 0.05})
     assert results["diseases"]["MSV"]["auroc_vs_healthy"] == 1.0
     assert results["diseases"]["MSV"]["n"] == 20
     assert set(results["baselines"]["MSV"]) == {"colour_distance"}   # no classifier given
     assert results["doubtful_mask_share"] == {"Healthy": 0.0, "MSV": 0.05}
+    assert results["error"] == "smoothed" and results["within_group_error_sd"] > 0
 
 
 # ---- symptomatic area A(x) ----

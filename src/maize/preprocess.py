@@ -19,6 +19,13 @@ LESION_HSV_LOW = (5, 40, 30)
 LESION_HSV_HIGH = (35, 255, 255)
 TOUCH_KERNEL = 7  # lesion pixels this close to green tissue count as leaf
 CLOSE_KERNEL = 5  # closes small gaps along the leaf edge
+MASK_OK = (0.10, 0.95)  # leaf fraction outside this range: no leaf found, or the background was kept
+
+# How the autoencoder's error is measured (proposal eq. 3.2), by name -> blur in pixels at AE_SIZE.
+# "plain" compares every pixel. "smoothed" first blurs the photo and the reconstruction inside the leaf,
+# so fine texture the autoencoder cannot rebuild anyway (veins, edges) stops counting and colour and tone
+# (yellowing, browning, dead tissue) remain. 4 px is about the detail an 8 x 8 code can carry at 128 px.
+ERRORS = {"plain": 0.0, "smoothed": 4.0}
 
 
 def decode(data: bytes) -> np.ndarray | None:
@@ -100,14 +107,36 @@ def leaf_fraction(mask: np.ndarray) -> float:
     return float(mask.mean())
 
 
+def usable_masks(masks: np.ndarray) -> np.ndarray:
+    """True per image whose leaf fraction is inside MASK_OK. masks (N,H,W). Others are left out of scoring."""
+    fractions = masks.mean(axis=(1, 2))
+    return (fractions >= MASK_OK[0]) & (fractions <= MASK_OK[1])
+
+
 def mask_background(images: np.ndarray, masks: np.ndarray) -> np.ndarray:
     """Autoencoder input: pixels outside the leaf set to 0. images (N,H,W,3), masks (N,H,W)."""
     return images * masks[..., None]
 
 
-def reconstruction_error(images: np.ndarray, recons: np.ndarray, masks: np.ndarray) -> np.ndarray:
-    """e(x) per image (proposal eq. 3.2): mean squared error over leaf pixels only.
-    images uint8 0-255, recons 0-1, masks 0/1; all batched (N, ...)."""
-    squared = (images / 255.0 - recons) ** 2 * masks[..., None]
-    leaf_values = 3 * np.maximum(masks.sum(axis=(1, 2)), 1)  # 3 colour values per leaf pixel
-    return squared.sum(axis=(1, 2, 3)) / leaf_values
+def blur_inside(images: np.ndarray, masks: np.ndarray, sigma: float) -> np.ndarray:
+    """Gaussian blur that only mixes leaf pixels with leaf pixels, so the leaf edge does not fade into
+    the background. images float (N,H,W,3), masks 0/1 (N,H,W)."""
+    out = np.empty_like(images)
+    for i, (image, mask) in enumerate(zip(images, masks.astype(np.float32))):
+        weight = cv2.GaussianBlur(mask, (0, 0), sigma)[..., None]
+        out[i] = cv2.GaussianBlur(image * mask[..., None], (0, 0), sigma) / np.maximum(weight, 1e-6)
+    return out
+
+
+def error_map(images: np.ndarray, recons: np.ndarray, masks: np.ndarray, sigma: float = 0.0) -> np.ndarray:
+    """Squared error per pixel (mean of R, G, B), 0 outside the leaf. sigma > 0: compare blurred versions.
+    images uint8 0-255, recons 0-1, masks 0/1; all batched (N, ...). Returns (N,H,W)."""
+    images, recons = (images / 255.0).astype(np.float32), recons.astype(np.float32)
+    if sigma:
+        images, recons = blur_inside(images, masks, sigma), blur_inside(recons, masks, sigma)
+    return ((images - recons) ** 2).mean(axis=-1) * masks
+
+
+def reconstruction_error(images: np.ndarray, recons: np.ndarray, masks: np.ndarray, sigma: float = 0.0) -> np.ndarray:
+    """e(x) per image (proposal eq. 3.2): mean squared error over leaf pixels only."""
+    return error_map(images, recons, masks, sigma).sum(axis=(1, 2)) / np.maximum(masks.sum(axis=(1, 2)), 1)

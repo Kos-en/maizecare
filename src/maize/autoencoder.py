@@ -13,8 +13,11 @@ the leaf from a random draw within that spread and a KL penalty keeps the code c
 this makes it harder to copy diseased leaves well. When scoring (and in the web app) it uses the mean.
 
 Background (outside the leaf mask) is set to 0 at the input and ignored by the loss and the error,
-so only leaf tissue counts. A diseased leaf reconstructs badly; evaluate.py turns its error into a
-0-1 severity score.
+so only leaf tissue counts. Photos whose leaf mask is doubtful (preprocess.MASK_OK) are left out.
+A diseased leaf reconstructs badly; evaluate.py turns its error into a 0-1 severity score.
+
+Each autoencoder is compared on val with both ways of measuring the error (preprocess.ERRORS: plain, or
+smoothed so fine texture stops counting). The best kind + error pair is the one used.
 
     maize-train-autoencoder ROOT MODELS [KIND ...]     default: both kinds
         -> MODELS/ae_<kind>/ and MODELS/autoencoders.csv (the comparison; the top row is used)
@@ -35,11 +38,10 @@ from keras import layers, ops
 
 from maize.evaluate import auroc
 from maize.pipeline import HEALTHY, command_args, load, load_usable_manifest, select
-from maize.preprocess import AE_SIZE, mask_background, reconstruction_error
+from maize.preprocess import AE_SIZE, ERRORS, mask_background, reconstruction_error, usable_masks
 
 KINDS = ("conv", "vae")
 LATENT = 32       # code channels
-MIN_LEAF = 0.10   # healthy training images with less leaf than this (no leaf found) are skipped
 EPOCHS = 30       # early stopping usually ends sooner
 SEED = 42
 MODEL_FILE = "autoencoder.keras"
@@ -141,13 +143,14 @@ class Autoencoder:
     def reconstruct(self, images: np.ndarray, masks: np.ndarray) -> np.ndarray:
         return self.model.predict(mask_background(images, masks).astype("float32"), batch_size=64, verbose=0)
 
-    def errors(self, images: np.ndarray, masks: np.ndarray, chunk: int = 1024) -> np.ndarray:
-        """e(x) per image, in the order given. In chunks, so memory stays low."""
+    def errors(self, images: np.ndarray, masks: np.ndarray, sigma: float = 0.0, chunk: int = 1024) -> np.ndarray:
+        """e(x) per image, in the order given; sigma > 0 smooths first (preprocess.ERRORS). In chunks,
+        so memory stays low."""
         errors = []
         for start in range(0, len(images), chunk):
             part = slice(start, start + chunk)
             recons = self.reconstruct(images[part], masks[part])
-            errors.append(reconstruction_error(images[part], recons, masks[part]))
+            errors.append(reconstruction_error(images[part], recons, masks[part], sigma))
         return np.concatenate(errors)
 
     def save(self, folder: Path) -> None:
@@ -167,45 +170,50 @@ def separation(labels: pd.Series, errors: pd.Series) -> dict:
 
 
 def compare(models: Path) -> pd.DataFrame:
-    """One row per trained autoencoder (MODELS/ae_<kind>/validation.json), best mean AUROC first."""
-    rows = [{"kind": f.parent.name.removeprefix("ae_"), **json.loads(f.read_text())}
-            for f in Path(models).glob("ae_*/validation.json")]
+    """One row per trained autoencoder and way of measuring its error (MODELS/ae_<kind>/validation.json),
+    best mean AUROC first."""
+    rows = [{"kind": f.parent.name.removeprefix("ae_"), "error": error, **result}
+            for f in Path(models).glob("ae_*/validation.json")
+            for error, result in json.loads(f.read_text()).items()]
     if not rows:
         raise SystemExit(f"No trained autoencoder in {models}: run maize-train-autoencoder first.")
     return pd.DataFrame(rows).sort_values("mean_auroc", ascending=False, ignore_index=True)
 
 
-def chosen(models: Path) -> Path:
-    """The folder of the autoencoder that separates healthy from diseased val leaves best."""
-    return Path(models) / f"ae_{compare(models)['kind'][0]}"
+def chosen(models: Path) -> tuple[Path, str]:
+    """(folder, error name) of the pair that separates healthy from diseased val leaves best."""
+    best = compare(models).iloc[0]
+    return Path(models) / f"ae_{best['kind']}", best["error"]
 
 
 # ---- the step ------------------------------------------------------------------------------------
-def healthy_training_leaves(df: pd.DataFrame, root: Path) -> tuple[np.ndarray, np.ndarray]:
-    images, masks = load(select(df, HEALTHY, "train"), root, AE_SIZE)
-    has_leaf = masks.mean(axis=(1, 2)) >= MIN_LEAF
-    print(f"Autoencoder: skipping {int((~has_leaf).sum())} of {len(has_leaf)} healthy train images "
-          f"with no leaf found (leaf fraction < {MIN_LEAF}).", flush=True)
-    return images[has_leaf], masks[has_leaf]
+def usable_leaves(rows: pd.DataFrame, root: Path) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
+    """The rows, images and masks whose leaf mask is usable (preprocess.MASK_OK)."""
+    images, masks = load(rows, root, AE_SIZE)
+    ok = usable_masks(masks)
+    print(f"  {int(ok.sum())} of {len(ok)} images have a usable leaf mask.", flush=True)
+    return rows[ok], images[ok], masks[ok]
 
 
 def train(df: pd.DataFrame, root: Path, out: Path, kinds=KINDS, epochs: int = EPOCHS) -> pd.DataFrame:
     """Healthy train leaves to learn, healthy val leaves for early stopping, all val leaves to compare.
     Writes out/ae_<kind>/ for each kind and out/autoencoders.csv."""
-    train_leaves = healthy_training_leaves(df, root)
-    healthy_val = load(select(df, HEALTHY, "val"), root, AE_SIZE)
-    val_rows = select(df, split="val")
-    val_images, val_masks = load(val_rows, root, AE_SIZE)
+    _, train_images, train_masks = usable_leaves(select(df, HEALTHY, "train"), root)
+    _, healthy_val_images, healthy_val_masks = usable_leaves(select(df, HEALTHY, "val"), root)
+    val_rows, val_images, val_masks = usable_leaves(select(df, split="val"), root)
 
     for kind in kinds:
         print(f"\n--- autoencoder: {kind} ---", flush=True)
         folder = out / f"ae_{kind}"
         autoencoder = Autoencoder.new(kind)
-        history = autoencoder.fit(train_leaves, healthy_val, epochs)
+        history = autoencoder.fit((train_images, train_masks), (healthy_val_images, healthy_val_masks), epochs)
         autoencoder.save(folder)
         history.to_csv(folder / "history.csv", index=False)
-        errors = pd.Series(autoencoder.errors(val_images, val_masks), index=val_rows.index)
-        (folder / "validation.json").write_text(json.dumps(separation(val_rows["label"], errors), indent=2))
+        validation = {}
+        for error, sigma in ERRORS.items():
+            errors = pd.Series(autoencoder.errors(val_images, val_masks, sigma), index=val_rows.index)
+            validation[error] = separation(val_rows["label"], errors)
+        (folder / "validation.json").write_text(json.dumps(validation, indent=2))
         keras.backend.clear_session()
 
     table = compare(out)

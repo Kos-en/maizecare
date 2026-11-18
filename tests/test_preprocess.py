@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pytest
 
 from maize.preprocess import leaf_fraction, leaf_mask, prepare, resize
 
@@ -36,3 +37,34 @@ def test_resize_keeps_shape_with_black_padding():
     out = resize(np.full((50, 100, 3), 200, np.uint8), 100)
     assert out.shape == (100, 100, 3)
     assert out[:25].max() == 0 and out[50, 50].min() == 200
+
+
+def test_usable_masks_flag_no_leaf_and_no_background_removed():
+    from maize.preprocess import usable_masks
+    masks = np.zeros((3, 10, 10), np.uint8)
+    masks[1, :5] = 1                               # half the image is leaf: fine
+    masks[2] = 1                                   # everything is "leaf": the background was kept
+    assert usable_masks(masks).tolist() == [False, True, False]
+
+
+def test_smoothed_error_ignores_fine_texture_but_not_colour():
+    from maize.preprocess import reconstruction_error
+    masks = np.ones((1, 64, 64), np.uint8)
+    flat = np.full((1, 64, 64, 3), 0.5, np.float32)                     # the autoencoder's flat sketch
+    textured = np.full((1, 64, 64, 3), 128, np.uint8)
+    textured[:, ::2, ::2] += 60                                         # veins: fine detail, same colour on average
+    textured[:, 1::2, 1::2] -= 60
+    yellowed = np.full((1, 64, 64, 3), (190, 170, 40), np.uint8)        # a colour change: disease
+    assert reconstruction_error(textured, flat, masks, 4.0) < 0.1 * reconstruction_error(textured, flat, masks)
+    assert reconstruction_error(yellowed, flat, masks, 4.0) == pytest.approx(
+        reconstruction_error(yellowed, flat, masks), rel=0.01)
+
+
+def test_smoothing_does_not_mix_in_the_background():
+    from maize.preprocess import blur_inside
+    image = np.zeros((1, 20, 20, 3), np.float32)
+    image[:, :, :10] = 0.8                          # the leaf is the left half, the background is black
+    masks = np.zeros((1, 20, 20), np.uint8)
+    masks[:, :, :10] = 1
+    blurred = blur_inside(image, masks, 4.0)
+    assert np.allclose(blurred[0, :, :10], 0.8, atol=1e-4)   # the leaf edge does not fade towards black

@@ -9,8 +9,10 @@ symptomatic area A(x) as Spearman rho and MAE after scaling both to 0-1. Two sim
 baselines get the same Spearman, so the autoencoder has something to beat:
     classifier   1 - P(healthy) from the chosen classifier (if one was trained)
     colour       mean colour distance of the leaf pixels from the average healthy training leaf
-Also: false-high rate on healthy leaves, score spread inside near-copy groups (stability), and per
-class the share of leaf masks flagged as doubtful (leaf fraction < 0.10 or > 0.95).
+Also: false-high rate on healthy leaves, error spread inside near-copy groups (stability), and per
+class the share of leaf masks flagged as doubtful (leaf fraction < 0.10 or > 0.95). Leaves with a
+doubtful mask are left out of everything else: their "error inside the leaf" is measured on soil or on
+a few pixels. The error is measured the way the chosen autoencoder was chosen with (plain or smoothed).
 
 Symptomatic area (proposal eq. 3.3): A(x) = 100 * |S| / |M|, M = leaf pixels, S = leaf pixels in a symptom
 colour range. It is the reference the score is checked against, never used to train anything. The
@@ -31,9 +33,7 @@ import pandas as pd
 from scipy.stats import mannwhitneyu, spearmanr
 
 from maize.pipeline import HEALTHY, command_args, data_version, load, load_usable_manifest, select
-from maize.preprocess import AE_SIZE, CLS_SIZE, mask_background
-
-MASK_OK = (0.10, 0.95)  # leaf fraction outside this range: the mask is doubtful
+from maize.preprocess import AE_SIZE, CLS_SIZE, ERRORS, error_map, mask_background, usable_masks
 
 # Symptom colours for A(x), fixed before any autoencoder score was seen. OpenCV HSV: hue 0-179
 # (degrees / 2), saturation and value 0-255. Healthy green is hue ~35-85.
@@ -147,22 +147,23 @@ def baseline_report(leaves: pd.DataFrame) -> dict:
     return baselines
 
 
-def report(rows: pd.DataFrame, test: pd.DataFrame, cal: dict) -> dict:
-    """rows: every usable image (error, score, leaf_fraction). test: the test rows with area and baselines."""
+def report(test: pd.DataFrame, cal: dict, doubtful_mask_share: dict) -> dict:
+    """test: the test rows with a usable mask, with error, score, area and baselines."""
     healthy = test[test["label"] == HEALTHY]
     diseases = dict(list(test[test["label"] != HEALTHY].groupby("label")))
-    doubtful = ~rows["leaf_fraction"].between(*MASK_OK)
     return {
+        "error": cal["error"],
         "false_high_rate": float((healthy["error"] > cal["e_healthy_p95"]).mean()),
-        "within_group_score_sd": float(test.groupby("group")["score"].std().median()),
-        "doubtful_mask_share": doubtful.groupby(rows["label"]).mean().to_dict(),
+        # the raw error, not the score: the score is clipped to 0 for most healthy leaves, so its spread is 0
+        "within_group_error_sd": float(test.groupby("group")["error"].std().median()),
+        "doubtful_mask_share": doubtful_mask_share,
         "diseases": {d: disease_report(leaves, healthy) for d, leaves in diseases.items()},
         "baselines": {d: baseline_report(leaves) for d, leaves in diseases.items()},
     }
 
 
 # ---- figures -------------------------------------------------------------------------------------
-def figures(rows: pd.DataFrame, autoencoder, root: Path, out: Path) -> None:
+def figures(rows: pd.DataFrame, autoencoder, root: Path, out: Path, sigma: float) -> None:
     """error_by_class.png (test) and heatmaps.png (one test leaf per class: masked input, reconstruction,
     error inside the leaf)."""
     import matplotlib.pyplot as plt
@@ -182,8 +183,8 @@ def figures(rows: pd.DataFrame, autoencoder, root: Path, out: Path) -> None:
     recons = autoencoder.reconstruct(images, masks)
     fig, axes = plt.subplots(len(examples), 3, figsize=(9, 3 * len(examples)), squeeze=False)
     for row, image, recon, mask, label in zip(axes, inputs, recons, masks, examples["label"]):
-        error_map = ((image / 255.0 - recon) ** 2).mean(axis=-1) * mask
-        for ax, picture, title in zip(row, (image, recon, error_map), (f"{label} (masked)", "reconstruction", "error")):
+        error = error_map(image[None], recon[None], mask[None], sigma)[0]
+        for ax, picture, title in zip(row, (image, recon, error), (f"{label} (masked)", "reconstruction", "error")):
             ax.imshow(picture, cmap="hot")
             ax.set_title(title)
             ax.axis("off")
@@ -193,16 +194,21 @@ def figures(rows: pd.DataFrame, autoencoder, root: Path, out: Path) -> None:
 
 
 # ---- the step ------------------------------------------------------------------------------------
-def run(df: pd.DataFrame, root: Path, folder: Path, classifier_dir: Path | None = None) -> None:
+def run(df: pd.DataFrame, root: Path, folder: Path, error: str = "plain", classifier_dir: Path | None = None) -> None:
     """Writes calibration.json (used by the web app), metrics.json, scores.csv and figures to folder."""
     from maize.autoencoder import Autoencoder
 
     autoencoder = Autoencoder.load(folder)
+    sigma = ERRORS[error]
     rows = select(df).copy()
     images, masks = load(rows, root, AE_SIZE)
-    rows["error"] = autoencoder.errors(images, masks)
+    ok = usable_masks(masks)
+    doubtful_mask_share = (~pd.Series(ok, index=rows.index)).groupby(rows["label"]).mean().to_dict()
+    rows, images, masks = rows[ok].copy(), images[ok], masks[ok]
+
+    rows["error"] = autoencoder.errors(images, masks, sigma)
     rows["leaf_fraction"] = masks.mean(axis=(1, 2))
-    cal = calibrate(rows) | {"data_version": data_version(df)}
+    cal = calibrate(rows) | {"error": error, "smooth_sigma": sigma, "data_version": data_version(df)}
     rows["score"] = score(rows["error"], cal)
 
     healthy_train = ((rows["label"] == HEALTHY) & (rows["split"] == "train")).to_numpy()
@@ -215,13 +221,13 @@ def run(df: pd.DataFrame, root: Path, folder: Path, classifier_dir: Path | None 
     test_images, test_masks = load(test, root, CLS_SIZE)  # A(x) and the classifier work at 224 px
     test["area"] = [symptomatic_area(image, mask) for image, mask in zip(test_images, test_masks)]
     test["p_diseased"] = classifier_p_diseased(classifier_dir, test_images) if classifier_dir else np.nan
-    results = report(rows, test, cal)
+    results = report(test, cal, doubtful_mask_share)
 
     (folder / "calibration.json").write_text(json.dumps(cal, indent=2))
     (folder / "metrics.json").write_text(json.dumps(results, indent=2))
     test[["path", "label", "group", "error", "score", "leaf_fraction", "area", "colour_distance", "p_diseased"]].to_csv(
         folder / "test_scores.csv", index=False)
-    figures(rows, autoencoder, root, folder)
+    figures(rows, autoencoder, root, folder, sigma)
     print(json.dumps(results, indent=2))
 
 
@@ -230,6 +236,7 @@ def main():
 
     root, models, *classifier = command_args("maize-evaluate DATA_ROOT MODELS [CLASSIFIER_DIR]", required=2)
     classifier_dir = Path(classifier[0]) if classifier else None
-    folder = chosen(Path(models))
-    print(f"Evaluating {folder.name}: it separates healthy from diseased val leaves best.", flush=True)
-    run(load_usable_manifest(Path(root)), Path(root), folder, classifier_dir)
+    folder, error = chosen(Path(models))
+    print(f"Evaluating {folder.name} with the {error} error: the pair that separates healthy from diseased "
+          "val leaves best.", flush=True)
+    run(load_usable_manifest(Path(root)), Path(root), folder, error, classifier_dir)
