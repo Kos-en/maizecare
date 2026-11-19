@@ -88,13 +88,10 @@ def fill_holes(mask: np.ndarray) -> np.ndarray:
 
 
 def central_component(mask: np.ndarray) -> np.ndarray:
-    """The connected piece that holds the middle of the image (or, if none does, the largest)."""
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    if n <= 1:  # nothing found
-        return mask
+    """The connected piece that holds the middle of the image (none: an empty mask, flagged as doubtful)."""
+    labels = cv2.connectedComponents(mask, connectivity=8)[1]
     middle = labels[mask.shape[0] // 2, mask.shape[1] // 2]
-    keep = middle if middle else 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-    return (labels == keep).astype(np.uint8)
+    return ((labels == middle) & (middle > 0)).astype(np.uint8)
 
 
 def _centre_ellipse(labels: np.ndarray, fraction: float, value: int) -> None:

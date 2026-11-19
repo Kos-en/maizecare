@@ -12,9 +12,9 @@ before any training.
   4. Split     whole groups, stratified by class: within each class, groups in a fixed (hash) order fill
                test, then val, then train until each holds 15% / 15% / 70% of that class's images
   5. Cache     each usable image resized to 128 and 224 px, with its leaf mask (preprocess.prepare), in
-               ROOT/cache_<size>[.npz|/part_*.npz] and ROOT/mask_v<version>_<size>[...] keyed by sha1 (ArrayStore).
-               Training reads these with load(), so photos are never re-read. A new mask version is computed
-               from the cached images. Saved every CACHE_SAVE_EVERY images, so an interrupted run resumes.
+               ROOT/cache_<size>/ and ROOT/mask_v<version>_<size>/ keyed by sha1 (ArrayStore). Training reads
+               these with load(), so photos are never re-read; a new mask version is made from the cached
+               images. Saved every 4,000 images, so an interrupted run resumes.
 
 Re-run after adding photos: only the new files are read. Steps 2-4 are redone on the whole dataset,
 so the result never depends on the order images arrived (adding photos can move groups between
@@ -29,7 +29,6 @@ import hashlib
 import io
 import os
 import sys
-import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -55,8 +54,7 @@ HAMMING = 6  # bits, on both hashes
 TEST_FRAC = 0.15
 VAL_FRAC = 0.15
 SAVE_EVERY = 1000  # save while reading, so an interrupted run resumes instead of starting over
-CACHE_SAVE_EVERY = 4000  # images per cache save: a crash loses at most this many
-READ_TRIES = 3     # Google Drive sometimes fails to return a file for a moment
+CACHE_SAVE_EVERY = 4000  # images per cache part file: a crash loses at most this many
 
 
 # ---- the manifest -------------------------------------------------------------------------------
@@ -296,48 +294,37 @@ class ArrayStore:
 
 
 def read_photo(path: str, size: int) -> tuple[np.ndarray, np.ndarray]:
-    for attempt in range(1, READ_TRIES + 1):
-        bgr = cv2.imread(path)
-        if bgr is not None:
-            return prepare(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), size)
-        time.sleep(2 * attempt)
-    raise FileNotFoundError(f"Could not read {path} (tried {READ_TRIES} times; is Google Drive still mounted?)")
+    bgr = cv2.imread(path)
+    if bgr is None:
+        raise FileNotFoundError(f"Could not read {path}")
+    return prepare(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), size)
 
 
 def in_chunks(rows: pd.DataFrame) -> list[pd.DataFrame]:
     return [rows.iloc[i:i + CACHE_SAVE_EVERY] for i in range(0, len(rows), CACHE_SAVE_EVERY)]
 
 
-def map_with_progress(pool: ThreadPoolExecutor, function, items, bar: tqdm) -> list:
-    """function(item) for every item on the thread pool, in order, ticking the progress bar."""
-    results = []
-    for result in pool.map(function, items):
-        results.append(result)
-        bar.update(1)
-    return results
-
-
 def load(rows: pd.DataFrame, root: Path, size: int, workers: int = 8) -> tuple[np.ndarray, np.ndarray]:
-    """(images, masks) for the manifest rows, in the same order. Photos are read only when the image
-    itself is not cached; a missing mask is computed from the cached image."""
+    """(images, masks) for the manifest rows, in the same order. A photo is read only if its image is not
+    cached yet; a missing mask is made from the cached image. Saved after every chunk."""
     images = ArrayStore(Path(root) / f"cache_{size}.npz", (size, size, 3))
     masks = ArrayStore(Path(root) / f"mask_v{MASK_VERSION}_{size}.npz", (size, size))  # new mask code, new name
     wanted = rows.drop_duplicates("sha1")
 
     with ThreadPoolExecutor(workers) as pool:
-        no_image = wanted[~wanted["sha1"].isin(set(images.keys))]
-        with tqdm(total=len(no_image), desc=f"reading photos {size}px", disable=no_image.empty) as bar:
-            for part in in_chunks(no_image):
-                paths = [str(Path(root) / p) for p in part["path"]]
-                done = map_with_progress(pool, lambda p: read_photo(p, size), paths, bar)
-                images.add(list(part["sha1"]), np.stack([image for image, _ in done]))
-                masks.add(list(part["sha1"]), np.stack([mask for _, mask in done]))
+        chunks = in_chunks(wanted[~wanted["sha1"].isin(set(images.keys))])
+        for n, part in enumerate(chunks, 1):
+            paths = [str(Path(root) / p) for p in part["path"]]
+            done = pool.map(lambda p: read_photo(p, size), paths)
+            done = list(tqdm(done, total=len(part), desc=f"reading photos {size}px, part {n} of {len(chunks)}"))
+            images.add(list(part["sha1"]), np.stack([image for image, _ in done]))
+            masks.add(list(part["sha1"]), np.stack([mask for _, mask in done]))
 
-        no_mask = wanted[~wanted["sha1"].isin(set(masks.keys))]
-        with tqdm(total=len(no_mask), desc=f"leaf masks {size}px", disable=no_mask.empty) as bar:
-            for part in in_chunks(no_mask):
-                done = map_with_progress(pool, padded_leaf_mask, images.get(part["sha1"]), bar)
-                masks.add(list(part["sha1"]), np.stack(done))
+        chunks = in_chunks(wanted[~wanted["sha1"].isin(set(masks.keys))])
+        for n, part in enumerate(chunks, 1):
+            done = pool.map(padded_leaf_mask, images.get(part["sha1"]))
+            done = list(tqdm(done, total=len(part), desc=f"leaf masks {size}px, part {n} of {len(chunks)}"))
+            masks.add(list(part["sha1"]), np.stack(done))
 
     return images.get(rows["sha1"]), masks.get(rows["sha1"])
 
