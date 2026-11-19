@@ -13,7 +13,8 @@ before any training.
                test, then val, then train until each holds 15% / 15% / 70% of that class's images
   5. Cache     each usable image resized to 128 and 224 px, with its leaf mask (preprocess.prepare), in
                ROOT/cache_<size>.npz and ROOT/mask_v<version>_<size>.npz keyed by sha1. Training reads these with
-               load(), so photos are never re-read. If you change preprocess.py, delete the cache files.
+               load(), so photos are never re-read. A new mask version is computed from the cached images,
+               not the photos. Saved every CACHE_SAVE_EVERY images, so an interrupted run resumes.
 
 Re-run after adding photos: only the new files are read. Steps 2-4 are redone on the whole dataset,
 so the result never depends on the order images arrived (adding photos can move groups between
@@ -28,6 +29,7 @@ import hashlib
 import io
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,7 +43,7 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from tqdm import tqdm
 
-from maize.preprocess import AE_SIZE, CLS_SIZE, MASK_VERSION, prepare
+from maize.preprocess import AE_SIZE, CLS_SIZE, MASK_VERSION, padded_leaf_mask, prepare
 
 HEALTHY = "Healthy"
 COLUMNS = ["path", "label", "sha1", "phash", "ahash", "group", "split", "status", "added_at"]
@@ -52,6 +54,8 @@ HAMMING = 6  # bits, on both hashes
 TEST_FRAC = 0.15
 VAL_FRAC = 0.15
 SAVE_EVERY = 1000  # save while reading, so an interrupted run resumes instead of starting over
+CACHE_SAVE_EVERY = 4000  # images per cache save: a crash loses at most this many
+READ_TRIES = 3     # Google Drive sometimes fails to return a file for a moment
 
 
 # ---- the manifest -------------------------------------------------------------------------------
@@ -273,28 +277,48 @@ class ArrayFile:
 
 
 def read_photo(path: str, size: int) -> tuple[np.ndarray, np.ndarray]:
-    bgr = cv2.imread(path)
-    if bgr is None:
-        raise FileNotFoundError(f"Could not read {path}")
-    return prepare(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), size)
+    for attempt in range(1, READ_TRIES + 1):
+        bgr = cv2.imread(path)
+        if bgr is not None:
+            return prepare(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), size)
+        time.sleep(2 * attempt)
+    raise FileNotFoundError(f"Could not read {path} (tried {READ_TRIES} times; is Google Drive still mounted?)")
+
+
+def in_chunks(rows: pd.DataFrame) -> list[pd.DataFrame]:
+    return [rows.iloc[i:i + CACHE_SAVE_EVERY] for i in range(0, len(rows), CACHE_SAVE_EVERY)]
+
+
+def map_with_progress(pool: ThreadPoolExecutor, function, items, bar: tqdm) -> list:
+    """function(item) for every item on the thread pool, in order, ticking the progress bar."""
+    results = []
+    for result in pool.map(function, items):
+        results.append(result)
+        bar.update(1)
+    return results
 
 
 def load(rows: pd.DataFrame, root: Path, size: int, workers: int = 8) -> tuple[np.ndarray, np.ndarray]:
-    """(images, masks) for the manifest rows, in the same order. Reads only photos missing from either cache."""
+    """(images, masks) for the manifest rows, in the same order. Photos are read only when the image
+    itself is not cached; a missing mask is computed from the cached image."""
     images = ArrayFile(Path(root) / f"cache_{size}.npz", (size, size, 3))
     masks = ArrayFile(Path(root) / f"mask_v{MASK_VERSION}_{size}.npz", (size, size))  # new mask code, new file
+    wanted = rows.drop_duplicates("sha1")
 
-    missing = rows[~rows["sha1"].isin(set(images.keys) & set(masks.keys))].drop_duplicates("sha1")
-    if len(missing):
-        new_images = np.empty((len(missing), size, size, 3), np.uint8)
-        new_masks = np.empty((len(missing), size, size), np.uint8)
-        paths = [str(Path(root) / p) for p in missing["path"]]
-        with ThreadPoolExecutor(workers) as pool:
-            done = pool.map(lambda p: read_photo(p, size), paths)
-            for i, (image, mask) in enumerate(tqdm(done, total=len(paths), desc=f"caching {size}px")):
-                new_images[i], new_masks[i] = image, mask
-        images.replace(list(missing["sha1"]), new_images)
-        masks.replace(list(missing["sha1"]), new_masks)
+    with ThreadPoolExecutor(workers) as pool:
+        no_image = wanted[~wanted["sha1"].isin(set(images.keys))]
+        with tqdm(total=len(no_image), desc=f"reading photos {size}px", disable=no_image.empty) as bar:
+            for part in in_chunks(no_image):
+                paths = [str(Path(root) / p) for p in part["path"]]
+                done = map_with_progress(pool, lambda p: read_photo(p, size), paths, bar)
+                images.replace(list(part["sha1"]), np.stack([image for image, _ in done]))
+                masks.replace(list(part["sha1"]), np.stack([mask for _, mask in done]))
+
+        no_mask = wanted[~wanted["sha1"].isin(set(masks.keys))]
+        with tqdm(total=len(no_mask), desc=f"leaf masks {size}px", disable=no_mask.empty) as bar:
+            for part in in_chunks(no_mask):
+                done = map_with_progress(pool, padded_leaf_mask, images.get(part["sha1"]), bar)
+                masks.replace(list(part["sha1"]), np.stack(done))
 
     return images.get(rows["sha1"]), masks.get(rows["sha1"])
 

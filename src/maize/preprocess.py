@@ -2,8 +2,9 @@
 see identical pixels. Only numpy + OpenCV, because the web app has no torch or Keras.
 
 Resizing (proposal 3.4): scale the longest side to the model size, then pad to a square with black,
-so the leaf keeps its shape. The leaf mask is computed on the scaled photo before padding, so the
-black padding is never "leaf" and the mask lines up pixel for pixel with the model input.
+so the leaf keeps its shape. The leaf mask is found on the photo inside the padding (padded_leaf_mask),
+so the black padding is never "leaf", the mask lines up pixel for pixel with the model input, and it
+can be recomputed from a cached model input without the original photo.
 """
 from __future__ import annotations
 
@@ -57,8 +58,20 @@ def resize(rgb: np.ndarray, size: int) -> np.ndarray:
 
 def prepare(rgb: np.ndarray, size: int) -> tuple[np.ndarray, np.ndarray]:
     """RGB photo -> (model input like resize(), leaf mask 0/1 of the same size; padding is 0)."""
-    scaled = _fit(rgb, size)
-    return _pad(scaled, size), _pad(leaf_mask(scaled), size)
+    image = resize(rgb, size)
+    return image, padded_leaf_mask(image)
+
+
+def padded_leaf_mask(image: np.ndarray) -> np.ndarray:
+    """Leaf mask of a model input from resize(): found on the photo inside the black padding (the
+    outermost rows and columns that are all black), 0 on the padding."""
+    rows = np.flatnonzero(image.any(axis=(1, 2)))
+    cols = np.flatnonzero(image.any(axis=(0, 2)))
+    mask = np.zeros(image.shape[:2], np.uint8)
+    if len(rows):
+        photo = (slice(rows[0], rows[-1] + 1), slice(cols[0], cols[-1] + 1))
+        mask[photo] = leaf_mask(image[photo])
+    return mask
 
 
 def _ellipse(k: int) -> np.ndarray:

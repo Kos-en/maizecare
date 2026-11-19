@@ -50,12 +50,23 @@ def test_masks_are_cached_with_the_same_keys(tmp_path):
     assert (load_masks(rows, tmp_path, 128) == masks).all()
 
 
-def test_photo_missing_from_the_mask_cache_is_redone(tmp_path):
+def test_a_missing_mask_is_made_from_the_cached_image_without_the_photo(tmp_path):
     from maize.pipeline import load
     rows = make_rows(tmp_path, [1, 2])
     images, masks = load(rows, tmp_path, 128)
-    (tmp_path / "mask_v2_128.npz").unlink()               # e.g. an image cache from before masks existed
+    (tmp_path / "mask_v2_128.npz").unlink()               # e.g. a new mask version
+    for i in (1, 2):
+        (tmp_path / f"{i}.png").unlink()                  # the photos are not needed for it
     images2, masks2 = load(rows, tmp_path, 128)
     assert (images2 == images).all() and (masks2 == masks).all()
     with np.load(tmp_path / "cache_128.npz") as z:
         assert len(z["sha1"]) == 2                     # no duplicate entries
+
+
+def test_the_cache_is_saved_in_chunks(tmp_path, monkeypatch):
+    import maize.pipeline as pipeline
+    monkeypatch.setattr(pipeline, "CACHE_SAVE_EVERY", 2)
+    rows = make_rows(tmp_path, [1, 2, 3, 4, 5])
+    images, masks = pipeline.load(rows, tmp_path, 128)
+    assert images.shape[0] == masks.shape[0] == 5
+    assert (images[4] == resize(cv2.cvtColor(cv2.imread(str(tmp_path / "5.png")), cv2.COLOR_BGR2RGB), 128)).all()
