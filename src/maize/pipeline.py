@@ -12,9 +12,9 @@ before any training.
   4. Split     whole groups, stratified by class: within each class, groups in a fixed (hash) order fill
                test, then val, then train until each holds 15% / 15% / 70% of that class's images
   5. Cache     each usable image resized to 128 and 224 px, with its leaf mask (preprocess.prepare), in
-               ROOT/cache_<size>.npz and ROOT/mask_v<version>_<size>.npz keyed by sha1. Training reads these with
-               load(), so photos are never re-read. A new mask version is computed from the cached images,
-               not the photos. Saved every CACHE_SAVE_EVERY images, so an interrupted run resumes.
+               ROOT/cache_<size>[.npz|/part_*.npz] and ROOT/mask_v<version>_<size>[...] keyed by sha1 (ArrayStore).
+               Training reads these with load(), so photos are never re-read. A new mask version is computed
+               from the cached images. Saved every CACHE_SAVE_EVERY images, so an interrupted run resumes.
 
 Re-run after adding photos: only the new files are read. Steps 2-4 are redone on the whole dataset,
 so the result never depends on the order images arrived (adding photos can move groups between
@@ -253,32 +253,46 @@ def split_for(share_before: float) -> str:
 
 
 # ---- step 5: the image + leaf mask cache, also read by training ----------------------------------
-class ArrayFile:
-    """One .npz cache: arrays keyed by sha1, loaded into memory, saved atomically."""
+class ArrayStore:
+    """One cache (e.g. ROOT/mask_v2_224): arrays keyed by sha1, loaded into memory.
+
+    On disk: ROOT/<name>.npz if an older run wrote one, plus ROOT/<name>/part_<n>.npz, one new file per
+    save. Files are only ever added, never overwritten: Google Drive twice served a damaged file after a
+    1.5 GB cache was overwritten several times in a row. A damaged part is skipped and its entries
+    recomputed. When a key is in several parts, the newest part wins."""
 
     def __init__(self, path: Path, item_shape: tuple):
-        self.path = path
-        self.keys, self.arrays = [], np.zeros((0, *item_shape), np.uint8)
+        self.folder = path.with_suffix("")
+        self.keys, self.parts = [], [np.zeros((0, *item_shape), np.uint8)]
+        files = sorted(self.folder.glob("part_*.npz"))
         if path.exists():
-            try:
-                with np.load(path) as z:
-                    self.keys, self.arrays = list(z["sha1"]), z["x"]
-            except (zipfile.BadZipFile, EOFError, KeyError, ValueError):
-                # e.g. the runtime stopped while Google Drive was still writing it. It is only a cache.
-                print(f"{path.name} is damaged: it will be rebuilt.", flush=True)
+            files.insert(0, path)  # the single file of an older run comes first, so newer parts win
+        for file in files:
+            self.read(file)
 
-    def replace(self, keys: list[str], arrays: np.ndarray) -> None:
-        """Add these entries, dropping any older entry with the same key, and save."""
-        keep = ~np.isin(self.keys, keys)
-        self.keys = [k for k, kept in zip(self.keys, keep) if kept] + list(keys)
-        self.arrays = np.concatenate([self.arrays[keep], arrays])
-        tmp = self.path.with_name(self.path.stem + ".tmp.npz")  # write then rename: a crash cannot corrupt it
-        np.savez(tmp, sha1=np.array(self.keys), x=self.arrays)
-        os.replace(tmp, self.path)
+    def read(self, file: Path) -> None:
+        try:
+            with np.load(file) as z:
+                keys, arrays = list(z["sha1"]), z["x"]
+        except (zipfile.BadZipFile, EOFError, KeyError, ValueError):
+            print(f"{file} is damaged: its images will be redone.", flush=True)
+            return
+        self.keys += keys
+        self.parts.append(arrays)
+
+    def add(self, keys: list[str], arrays: np.ndarray) -> None:
+        """Save these entries as a new part file."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        number = len(list(self.folder.glob("part_*.npz")))
+        np.savez(self.folder / f"part_{number:04d}.npz", sha1=np.array(keys), x=arrays)
+        self.keys += list(keys)
+        self.parts.append(arrays)
 
     def get(self, keys: pd.Series) -> np.ndarray:
-        position = {k: i for i, k in enumerate(self.keys)}
-        return self.arrays[[position[k] for k in keys]]
+        if len(self.parts) > 1:
+            self.parts = [np.concatenate(self.parts)]
+        position = {k: i for i, k in enumerate(self.keys)}  # a later (newer) entry overwrites an earlier one
+        return self.parts[0][[position[k] for k in keys]]
 
 
 def read_photo(path: str, size: int) -> tuple[np.ndarray, np.ndarray]:
@@ -306,8 +320,8 @@ def map_with_progress(pool: ThreadPoolExecutor, function, items, bar: tqdm) -> l
 def load(rows: pd.DataFrame, root: Path, size: int, workers: int = 8) -> tuple[np.ndarray, np.ndarray]:
     """(images, masks) for the manifest rows, in the same order. Photos are read only when the image
     itself is not cached; a missing mask is computed from the cached image."""
-    images = ArrayFile(Path(root) / f"cache_{size}.npz", (size, size, 3))
-    masks = ArrayFile(Path(root) / f"mask_v{MASK_VERSION}_{size}.npz", (size, size))  # new mask code, new file
+    images = ArrayStore(Path(root) / f"cache_{size}.npz", (size, size, 3))
+    masks = ArrayStore(Path(root) / f"mask_v{MASK_VERSION}_{size}.npz", (size, size))  # new mask code, new name
     wanted = rows.drop_duplicates("sha1")
 
     with ThreadPoolExecutor(workers) as pool:
@@ -316,14 +330,14 @@ def load(rows: pd.DataFrame, root: Path, size: int, workers: int = 8) -> tuple[n
             for part in in_chunks(no_image):
                 paths = [str(Path(root) / p) for p in part["path"]]
                 done = map_with_progress(pool, lambda p: read_photo(p, size), paths, bar)
-                images.replace(list(part["sha1"]), np.stack([image for image, _ in done]))
-                masks.replace(list(part["sha1"]), np.stack([mask for _, mask in done]))
+                images.add(list(part["sha1"]), np.stack([image for image, _ in done]))
+                masks.add(list(part["sha1"]), np.stack([mask for _, mask in done]))
 
         no_mask = wanted[~wanted["sha1"].isin(set(masks.keys))]
         with tqdm(total=len(no_mask), desc=f"leaf masks {size}px", disable=no_mask.empty) as bar:
             for part in in_chunks(no_mask):
                 done = map_with_progress(pool, padded_leaf_mask, images.get(part["sha1"]), bar)
-                masks.replace(list(part["sha1"]), np.stack(done))
+                masks.add(list(part["sha1"]), np.stack(done))
 
     return images.get(rows["sha1"]), masks.get(rows["sha1"])
 
