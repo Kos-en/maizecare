@@ -86,19 +86,21 @@ def test_separation_measures_each_disease_against_healthy():
     assert result["auroc_MSV"] == 1.0
     assert result["auroc_MLND"] < 1.0
     assert result["mean_auroc"] == pytest.approx((result["auroc_MSV"] + result["auroc_MLND"]) / 2)
+    assert result["worst_auroc"] == result["auroc_MLND"]
     assert result["healthy_median_error"] == pytest.approx(0.2)
 
 
-def test_the_best_separating_autoencoder_and_error_are_chosen(tmp_path):
-    validation = {"conv": {"plain": 0.81, "smoothed": 0.90}, "vae": {"plain": 0.88, "smoothed": 0.84}}
+def test_the_pair_with_the_best_weakest_disease_is_chosen(tmp_path):
+    validation = {"conv": {"plain": (0.86, 0.84, 0.87), "smoothed": (0.92, 0.90, 0.72)},
+                  "vae": {"plain": (0.88, 0.86, 0.82), "smoothed": (0.88, 0.89, 0.80)}}
     for kind, by_error in validation.items():
         (tmp_path / f"ae_{kind}").mkdir()
-        results = {error: {"mean_auroc": auc} for error, auc in by_error.items()}
+        results = {error: {"auroc_MLB": a, "auroc_MLND": b, "auroc_MSV": c, "mean_auroc": (a + b + c) / 3}
+                   for error, (a, b, c) in by_error.items()}
         (tmp_path / f"ae_{kind}" / "validation.json").write_text(json.dumps(results))
     table = compare(tmp_path)
-    assert list(zip(table["kind"], table["error"])) == [
-        ("conv", "smoothed"), ("vae", "plain"), ("vae", "smoothed"), ("conv", "plain")]
-    assert chosen(tmp_path) == (tmp_path / "ae_conv", "smoothed")
+    assert list(zip(table["kind"], table["error"]))[:2] == [("conv", "plain"), ("vae", "plain")]
+    assert chosen(tmp_path) == (tmp_path / "ae_conv", "plain")
 
 
 def test_no_trained_autoencoder_is_a_clear_error(tmp_path):

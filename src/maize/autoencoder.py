@@ -1,5 +1,6 @@
 """Stage 2: severity. Two autoencoders are trained on healthy leaves only, inside the leaf mask, and the one
-whose error best separates healthy from diseased validation leaves is used (proposal 3.4 step 7, 3.5.2, eq. 3.2).
+whose error best separates healthy from diseased validation leaves (on its weakest disease) is used
+(proposal 3.4 step 7, 3.5.2, eq. 3.2).
 
     conv   convolutional autoencoder
     vae    variational autoencoder of the same shape (Kingma & Welling 2014)
@@ -166,18 +167,20 @@ def separation(labels: pd.Series, errors: pd.Series) -> dict:
     healthy = errors[labels == HEALTHY]
     aurocs = {f"auroc_{d}": auroc(healthy, errors[labels == d]) for d in sorted(set(labels) - {HEALTHY})}
     return {"healthy_median_error": float(healthy.median()), **aurocs,
-            "mean_auroc": float(np.mean(list(aurocs.values())))}
+            "worst_auroc": float(min(aurocs.values())), "mean_auroc": float(np.mean(list(aurocs.values())))}
 
 
 def compare(models: Path) -> pd.DataFrame:
     """One row per trained autoencoder and way of measuring its error (MODELS/ae_<kind>/validation.json),
-    best mean AUROC first."""
+    best first: highest AUROC on its weakest disease, because the target (AUROC >= 0.80) is per disease."""
     rows = [{"kind": f.parent.name.removeprefix("ae_"), "error": error, **result}
             for f in Path(models).glob("ae_*/validation.json")
             for error, result in json.loads(f.read_text()).items()]
     if not rows:
         raise SystemExit(f"No trained autoencoder in {models}: run maize-train-autoencoder first.")
-    return pd.DataFrame(rows).sort_values("mean_auroc", ascending=False, ignore_index=True)
+    table = pd.DataFrame(rows)
+    table["worst_auroc"] = table.filter(like="auroc_").min(axis=1)  # also for validation.json from older runs
+    return table.sort_values(["worst_auroc", "mean_auroc"], ascending=False, ignore_index=True)
 
 
 def chosen(models: Path) -> tuple[Path, str]:
