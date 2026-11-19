@@ -30,6 +30,7 @@ import io
 import os
 import sys
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -259,8 +260,12 @@ class ArrayFile:
         self.path = path
         self.keys, self.arrays = [], np.zeros((0, *item_shape), np.uint8)
         if path.exists():
-            with np.load(path) as z:
-                self.keys, self.arrays = list(z["sha1"]), z["x"]
+            try:
+                with np.load(path) as z:
+                    self.keys, self.arrays = list(z["sha1"]), z["x"]
+            except (zipfile.BadZipFile, EOFError, KeyError, ValueError):
+                # e.g. the runtime stopped while Google Drive was still writing it. It is only a cache.
+                print(f"{path.name} is damaged: it will be rebuilt.", flush=True)
 
     def replace(self, keys: list[str], arrays: np.ndarray) -> None:
         """Add these entries, dropping any older entry with the same key, and save."""

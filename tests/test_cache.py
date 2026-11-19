@@ -70,3 +70,11 @@ def test_the_cache_is_saved_in_chunks(tmp_path, monkeypatch):
     images, masks = pipeline.load(rows, tmp_path, 128)
     assert images.shape[0] == masks.shape[0] == 5
     assert (images[4] == resize(cv2.cvtColor(cv2.imread(str(tmp_path / "5.png")), cv2.COLOR_BGR2RGB), 128)).all()
+
+
+def test_a_damaged_cache_file_is_rebuilt(tmp_path):
+    from maize.pipeline import load
+    rows = make_rows(tmp_path, [1, 2])
+    images, masks = load(rows, tmp_path, 128)
+    (tmp_path / "mask_v2_128.npz").write_bytes(b"half a file")      # an interrupted write
+    assert (load(rows, tmp_path, 128)[1] == masks).all()
