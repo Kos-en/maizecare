@@ -79,6 +79,10 @@ nohup sh -c "maize-train-classifier $D $M; maize-train-autoencoder $D $M" > $D/t
 maize-evaluate $D $M $M/clf_<best backbone>          # after reading $M/classifiers.csv
 ```
 
+**Results notebook** (`notebooks/maizecare.ipynb`): open it in Colab (File → Upload notebook, or from GitHub).
+It trains nothing: it reads the models and results from Drive and shows the data, both stages, the test results
+against the targets, and the full pipeline on test photos or your own photo. A CPU runtime is enough.
+
 ## Web app
 
 ```
