@@ -14,7 +14,7 @@ did not.
 
 - **Code structure and clean-up.** Turning my experiment code into the `maize` package (`src/maize/`), splitting it
   into the data pipeline, the two models, evaluation and the API, and removing dead or repeated code.
-- **Engineering around the models.** The FastAPI service, the Dockerfile and docker-compose, the GitHub Actions CI,
+- **Engineering around the models.** The FastAPI service, the Dockerfile, the GitHub Actions CI,
   dependency pinning with `uv`, and the TypeScript frontend.
 - **Tests.** Writing and fixing the pytest suite in `tests/`.
 - **Debugging.** For example, near-copy detection chaining unrelated photos together when only one hash was

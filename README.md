@@ -32,7 +32,7 @@ flowchart LR
 | Data pipeline (scripted, reproducible) | [`src/maize/pipeline.py`](src/maize/pipeline.py), run with `maize-prepare` |
 | Model training code | [`classifier.py`](src/maize/classifier.py), [`autoencoder.py`](src/maize/autoencoder.py), [`evaluate.py`](src/maize/evaluate.py) |
 | Trained models (serialized) | [`release/`](release/): `classifier.onnx`, `classifier.json`, `model.onnx`, `calibration.json` |
-| Dockerfile and docker-compose | [`Dockerfile`](Dockerfile), [`docker-compose.yml`](docker-compose.yml) |
+| Dockerfile | [`Dockerfile`](Dockerfile) |
 | API service | [`src/maize/serve.py`](src/maize/serve.py) (FastAPI) |
 | Final report | [REPORT.md](REPORT.md), with the figures in the [results notebook](notebooks/maizecare.ipynb) |
 
@@ -54,7 +54,7 @@ tests/            pytest suite
 You need Docker and the four model files in `release/`.
 
 ```bash
-docker compose up --build      # then open http://localhost:8000
+make docker                    # builds the image and runs it; then open http://localhost:8000
 ```
 
 Without Docker (Python 3.12+ and Node 24):
