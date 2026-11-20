@@ -38,7 +38,7 @@ SAVE_EVERY = 1000  # save while reading, so an interrupted run resumes
 CACHE_SAVE_EVERY = 4000  # images per cache part file
 
 
-# ---- the manifest -------------------------------------------------------------------------------
+#Manifest
 def load_manifest(root: Path) -> pd.DataFrame:
     path = Path(root) / "manifest.csv"
     if not path.exists():
@@ -84,7 +84,7 @@ def command_args(usage: str, required: int) -> list[str]:
     return args
 
 
-# ---- the pipeline -------------------------------------------------------------------------------
+#Pipeline
 class DataPipeline:
     """Runs the steps in order on raw/<Class>/ images, keeping the manifest in self.df."""
 
@@ -183,7 +183,7 @@ class DataPipeline:
         print(f"\nLeak check: {self.count_leaks()} near-copy pairs cross splits (must be 0).")
 
 
-# ---- helpers ------------------------------------------------------------------------------------
+#Helpers
 def inspect(path: Path) -> dict:
     """Content hash, perceptual hashes and file-check status of one image."""
     try:
@@ -225,7 +225,7 @@ def split_for(share_before: float) -> str:
     return "train"
 
 
-# ---- the image + leaf mask cache ----------------------------------------------------------------
+#Image + leaf mask cache
 class ArrayStore:
     """A cache of arrays keyed by sha1, loaded into memory.
 

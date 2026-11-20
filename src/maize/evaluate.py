@@ -28,7 +28,7 @@ SYMPTOM_RANGES = {
 }
 
 
-# ---- symptomatic area A(x) -----------------------------------------------------------------------
+#Symptomatic area A(x)
 def symptom_pixels(rgb: np.ndarray) -> np.ndarray:
     """True where a pixel falls in any symptom colour range. rgb: H x W x 3 uint8."""
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
@@ -44,7 +44,7 @@ def symptomatic_area(rgb: np.ndarray, mask: np.ndarray) -> float:
     return float(100 * (symptom_pixels(rgb) & leaf).sum() / max(leaf.sum(), 1))
 
 
-# ---- the score -----------------------------------------------------------------------------------
+#Score
 def score(errors: pd.Series, cal: dict) -> pd.Series:
     healthy, disease = cal["e_healthy_median"], cal["e_disease_p99"]
     return ((errors - healthy) / (disease - healthy)).clip(0, 1)
@@ -66,7 +66,7 @@ def calibrate(rows: pd.DataFrame) -> dict:
     return cal
 
 
-# ---- measures ------------------------------------------------------------------------------------
+#Measures
 def auroc(healthy: pd.Series, diseased: pd.Series) -> float:
     """Chance that a diseased leaf has a higher value than a healthy one (Mann-Whitney U / n1 n2)."""
     return float(mannwhitneyu(diseased, healthy).statistic / (len(diseased) * len(healthy)))
@@ -111,7 +111,7 @@ def classifier_p_diseased(classifier_dir: Path, images: np.ndarray) -> np.ndarra
     return 1 - np.concatenate(probs)[:, labels.index(HEALTHY)]
 
 
-# ---- report --------------------------------------------------------------------------------------
+#Report
 def disease_report(leaves: pd.DataFrame, healthy: pd.DataFrame) -> dict:
     """The autoencoder score on one disease. leaves / healthy: test rows with error, score and area."""
     return {
@@ -146,7 +146,7 @@ def report(test: pd.DataFrame, cal: dict, doubtful_mask_share: dict) -> dict:
     }
 
 
-# ---- figures -------------------------------------------------------------------------------------
+#Figures
 def figures(rows: pd.DataFrame, autoencoder, root: Path, out: Path, sigma: float) -> None:
     """error_by_class.png and heatmaps.png (one test leaf per class)."""
     import matplotlib.pyplot as plt
@@ -176,7 +176,7 @@ def figures(rows: pd.DataFrame, autoencoder, root: Path, out: Path, sigma: float
     plt.close(fig)
 
 
-# ---- the step ------------------------------------------------------------------------------------
+#Evaluation
 def run(df: pd.DataFrame, root: Path, folder: Path, error: str = "plain", classifier_dir: Path | None = None) -> None:
     """Writes calibration.json, metrics.json, test_scores.csv and figures to folder."""
     from maize.autoencoder import Autoencoder

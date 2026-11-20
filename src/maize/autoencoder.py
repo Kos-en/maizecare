@@ -30,7 +30,7 @@ MODEL_FILE = "autoencoder.keras"
 BETA = (AE_SIZE // 16) ** 2 * LATENT / (AE_SIZE * AE_SIZE * 3)
 
 
-# ---- the networks --------------------------------------------------------------------------------
+#Networks
 def encode(image):
     x = layers.Rescaling(1 / 255)(image)
     for filters in (32, 64, 128, 256):  # 128 -> 64 -> 32 -> 16 -> 8 px
@@ -138,7 +138,7 @@ class Autoencoder:
         self.model.export(str(folder / "model.onnx"), format="onnx")
 
 
-# ---- choosing between them -----------------------------------------------------------------------
+#Choosing between them
 def separation(labels: pd.Series, errors: pd.Series) -> dict:
     """How well the errors of one autoencoder separate healthy from each disease (val leaves)."""
     healthy = errors[labels == HEALTHY]
@@ -165,7 +165,7 @@ def chosen(models: Path) -> tuple[Path, str]:
     return Path(models) / f"ae_{best['kind']}", best["error"]
 
 
-# ---- the step ------------------------------------------------------------------------------------
+#Training
 def usable_leaves(rows: pd.DataFrame, root: Path) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
     """The rows, images and masks whose leaf mask is usable."""
     images, masks = load(rows, root, AE_SIZE)
