@@ -39,7 +39,7 @@ def test_second_call_does_not_read_images_and_new_images_are_added(tmp_path):
 
 
 def test_masks_are_cached_with_the_same_keys(tmp_path):
-    from maize.pipeline import load, load_masks
+    from maize.pipeline import load
     from maize.preprocess import prepare
     rows = make_rows(tmp_path, [1, 2])
     images, masks = load(rows, tmp_path, 128)
@@ -49,7 +49,7 @@ def test_masks_are_cached_with_the_same_keys(tmp_path):
     assert (tmp_path / "mask_v2_128" / "part_0000.npz").exists()
     for i in (1, 2):
         (tmp_path / f"{i}.png").unlink()
-    assert (load_masks(rows, tmp_path, 128) == masks).all()
+    assert (load(rows, tmp_path, 128)[1] == masks).all()  # photos gone: read from the cache
 
 
 def test_a_missing_mask_is_made_from_the_cached_image_without_the_photo(tmp_path):

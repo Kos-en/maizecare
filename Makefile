@@ -3,7 +3,8 @@ RAW ?= data/raw
 DATA ?= data
 MODELS ?= models
 CLF ?= clf_mobilenet_v2
-AE ?= ae_conv                        # the autoencoder maize-evaluate chose (top row of MODELS/autoencoders.csv)
+# the autoencoder maize-evaluate chose (top row of MODELS/autoencoders.csv); a comment after the value would add spaces to it
+AE ?= ae_conv
 
 .PHONY: install data release frontend serve docker test lock
 

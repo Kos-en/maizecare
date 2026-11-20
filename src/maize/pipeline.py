@@ -333,10 +333,6 @@ def load_images(rows: pd.DataFrame, root: Path, size: int) -> np.ndarray:
     return load(rows, root, size)[0]
 
 
-def load_masks(rows: pd.DataFrame, root: Path, size: int) -> np.ndarray:
-    return load(rows, root, size)[1]
-
-
 def main():
     raw, root = command_args("maize-prepare RAW_FOLDER DATA_ROOT", required=2)[:2]
     if not Path(raw).is_dir():
