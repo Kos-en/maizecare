@@ -4,8 +4,8 @@
 
 Joseph Kosen, Strathmore University
 
-> **Before submitting:** every `TODO` below is a number to copy from the results notebook
-> (`notebooks/maizecare.ipynb`, Runtime -> Run all). The section of the notebook is named next to each one.
+> **Before submitting:** the two remaining `TODO`s (the exploratory analysis in 4.1 and the robustness numbers in
+> 4.2) come from running the results notebook (`notebooks/maizecare.ipynb`).
 
 ## 1. The problem
 
@@ -100,12 +100,18 @@ All choices were made on validation; the test photos were used once, at the end.
 
 ### 4.1 Data (notebook sections 1 and 2)
 
+The pipeline read 35,596 photos. It removed 4,123 exact copies and 31 photos in groups holding two classes,
+leaving **31,442 usable photos**.
+
 | | Healthy | MLB | MLND | MSV |
 |---|---|---|---|---|
-| usable photos | TODO | TODO | TODO | TODO |
-| train / val / test | TODO | TODO | TODO | TODO |
+| usable photos | 8,690 | 5,276 | 9,376 | 8,100 |
+| train / val / test | 6,083 / 1,303 / 1,304 | 3,693 / 791 / 792 | 6,563 / 1,406 / 1,407 | 5,670 / 1,215 / 1,215 |
+| near-copy groups | 8,676 | 5,276 | 9,362 | 8,054 |
 
-Near-copy pairs crossing a split: **TODO (must be 0)**.
+Every class landed on the 70 / 15 / 15 target. Requiring both hashes keeps near-copy groups small (largest: 9
+photos), so whole groups could be split cleanly. Near-copy pairs crossing a split: **0**. Compare the earlier
+version: one group of over 3,700 photos, and a 95.7 / 2.8 / 1.4 split.
 
 Exploratory analysis: TODO, one or two sentences each on class balance, photo sizes per class, the colour and
 brightness profiles, and what the t-SNE map shows (separate clusters or overlap).
@@ -114,32 +120,49 @@ brightness profiles, and what the t-SNE map shows (separate clusters or overlap)
 
 | Backbone | Val macro-F1 | Test macro-F1 | Test ECE | Size (MB) |
 |---|---|---|---|---|
-| MobileNetV2 (chosen) | TODO | TODO | TODO | TODO |
-| MobileNetV3-Small | TODO | TODO | TODO | TODO |
-| EfficientNet-B0 | TODO | TODO | TODO | TODO |
-| ResNet50 | TODO | TODO | TODO | TODO |
+| **MobileNetV2 (chosen)** | 0.963 | **0.963** | 0.006 | **9.4** |
+| MobileNetV3-Small | 0.950 | 0.954 | 0.007 | 4.2 |
+| EfficientNet-B0 | 0.958 | 0.963 | 0.009 | 16.9 |
+| ResNet50 | 0.970 | 0.965 | 0.020 | 94.8 |
 
-Target (a): TODO met / not met (MobileNetV2 is TODO points from ResNet50 and TODO x smaller).
-Robustness on degraded test photos, macro-F1: clean TODO, blurred TODO, low light TODO.
-Speed: TODO ms per photo for the whole pipeline on a CPU.
+**Target (a) is met.** MobileNetV2 is 0.2 points below ResNet50 on test and 10x smaller. It is also the best
+calibrated (ECE 0.006): when it says 90%, it is right about 90% of the time, which is what makes the "please
+retake" threshold trustworthy. On the 4,718 test photos, recall per class is Healthy 96.6%, MLB 93.8%, MLND
+97.7% and MSV 96.5%. MLB is the hardest class, mostly confused with Healthy (27 photos).
+
+Robustness on degraded test photos, macro-F1: clean TODO, blurred TODO, dark TODO.
 
 ### 4.3 Stage 2: severity (notebook sections 5 and 6)
 
 The leaf mask mattered most. Replacing the colour rule with GrabCut raised the validation AUROC from **0.65 to
-0.86**. The chosen autoencoder is TODO (conv / VAE) with the TODO (plain / smoothed) error.
+0.86**. The chosen autoencoder is the **convolutional** one with the **plain** error. On validation it had the best
+AUROC on its weakest disease (0.84). The VAE was as good on average (0.858) but dropped to 0.80 on MSV.
 
-| Disease | (b) AUROC vs healthy | (c) Spearman vs A(x) | Baseline: colour distance | Baseline: classifier |
-|---|---|---|---|---|
-| MLB | TODO | TODO | TODO | TODO |
-| MLND | TODO | TODO | TODO | TODO |
-| MSV | TODO | TODO | TODO | TODO |
+| Disease | test leaves | (b) AUROC vs healthy | (c) Spearman vs A(x) | Baseline: colour distance | Baseline: classifier |
+|---|---|---|---|---|---|
+| MLB | 709 | **0.862** | 0.312 | 0.157 | 0.220 |
+| MLND | 1,387 | **0.843** | 0.345 | 0.430 | 0.383 |
+| MSV | 1,050 | **0.862** | 0.273 | 0.180 | 0.284 |
 
-Healthy test leaves scored above the healthy range: TODO %.
+Healthy test leaves scored above the healthy range: 5.3% (about the 5% expected, since that range is the 95th
+percentile of healthy validation leaves). Leaf masks flagged as doubtful and left out: Healthy 5%, MLB 10%,
+MLND 2%, MSV 14%.
 
-**Reading the results.** Detection (b) is met. The severity ranking (c) is partial: the autoencoder follows
-streaks and lesions (MSV, MLB) better than broad yellowing (MLND). A uniformly yellowed leaf is still a smooth
-leaf shape, which the autoencoder partly rebuilds, so its error stays low even though A(x) is high. TODO: adjust
-this paragraph to the final numbers.
+**Reading the results.**
+
+- **Target (b) is met for every disease.** The autoencoder's error tells a diseased leaf from a healthy one with an
+  AUROC of 0.84-0.86, without ever seeing a diseased leaf in training.
+- **Target (c) is not met.** The score does rank leaves by severity (every Spearman is positive), but only
+  weakly: 0.27-0.35, below the 0.40 target.
+- **Against the baselines, it depends on the disease.** For MLB, the autoencoder clearly beats both baselines
+  (0.31 against 0.16 and 0.22). For MSV it beats the colour baseline and ties the classifier. For MLND both
+  baselines do better.
+- **Two reasons for MLND.** First, MLND mostly shows as broad yellowing: a uniformly yellowed leaf is still a
+  smooth leaf shape, which the autoencoder partly rebuilds, so its error stays low. Second, A(x) itself measures
+  colour, so a colour-based baseline is naturally close to it on a disease that is mostly a colour change.
+
+In short, the autoencoder is a reliable "is something wrong with this leaf" detector and a rough severity
+indicator, strongest on lesion-type damage (MLB).
 
 ## 5. Deployment
 
@@ -152,7 +175,7 @@ deploys `main` automatically. Photos are processed in memory and never stored. S
 
 - **No ground-truth severity.** A(x) is a colour rule, not an expert's rating. Agreement with it is evidence, not
   proof, that the score measures severity.
-- **MLND severity is the weak spot**, for the reason in 4.3.
+- **Severity ranking is weak (target c not met)**, and weakest for MLND, for the reasons in 4.3.
 - **Data quality.** Some photos in the Healthy folder are not maize (for example bean leaves). Photos come from a
   few sources, and results per source (Tanzania / Uganda) are not yet reported.
 - **Robustness was tested on synthetic blur and darkening**, not on real poor-quality field photos.
