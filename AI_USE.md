@@ -12,6 +12,8 @@ In line with the course policy, this is where I used AI in this project.
   photos are not re-read, removing repeated or unused code, and making the code easier to read.
 - **Unit tests.** The AI generated the unit tests in `tests/`, to make the project more robust: they check the
   data pipeline, the image cache, preprocessing, both models, the evaluation and the API on every push.
+- **CI/CD for deployment.** The AI generated the GitHub Actions pipeline (`.github/workflows/ci.yml`) that lints
+  and tests the code and builds the Docker image on every push, and the Render deployment setup (`render.yaml`).
 - **Debugging help** when something broke, and help with documentation.
 
 **What I did:** the problem, the approach, the data, the modelling decisions, running the training and
