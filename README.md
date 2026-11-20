@@ -94,7 +94,7 @@ deterministic, so the same photos give the same split and comparable models.
 
 **Results without retraining:** open [`notebooks/maizecare.ipynb`](notebooks/maizecare.ipynb) in Colab
 (File -> Upload notebook) and choose Runtime -> Run all. It reads the trained models from Drive and shows the
-data, the exploratory analysis, both models, the test results and the full pipeline on test photos or your own.
+data, the exploratory analysis, both models, the test results and the full pipeline on test photos.
 
 ## The data pipeline: `maize-prepare`
 
