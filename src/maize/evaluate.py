@@ -1,26 +1,11 @@
-"""Severity from the autoencoder (proposal 3.5.2 and 3.6): calibrate on val, report on test.
+"""Severity from the autoencoder: calibrate the 0-1 score on val, report on test.
 
-    score s(x) = clip((e - median healthy val error) / (p99 diseased val error - median healthy val error), 0, 1)
-    healthy range: e <= p95 of healthy val errors
-    grades: per disease, the tertiles of training scores split mild / moderate / severe
+    score = clip((e - median healthy val error) / (p99 diseased val error - median healthy val error), 0, 1)
 
-Reported on test, per disease: AUROC healthy vs disease, and agreement of the score with the
-symptomatic area A(x) as Spearman rho and MAE after scaling both to 0-1. Two simple
-baselines get the same Spearman, so the autoencoder has something to beat:
-    classifier   1 - P(healthy) from the chosen classifier (if one was trained)
-    colour       mean colour distance of the leaf pixels from the average healthy training leaf
-Also: false-high rate on healthy leaves, error spread inside near-copy groups (stability), and per
-class the share of leaf masks flagged as doubtful (leaf fraction < 0.10 or > 0.95). Leaves with a
-doubtful mask are left out of everything else: their "error inside the leaf" is measured on soil or on
-a few pixels. The error is measured the way the chosen autoencoder was chosen with (plain or smoothed).
-
-Symptomatic area (proposal eq. 3.3): A(x) = 100 * |S| / |M|, M = leaf pixels, S = leaf pixels in a symptom
-colour range. It is the reference the score is checked against, never used to train anything. The
-colour ranges were set before any autoencoder score was seen and must not be tuned on them.
+The score is checked against A(x), the share of the leaf in a symptom colour, and against two simple baselines
+(1 - P(healthy) from the classifier, and colour distance from an average healthy leaf).
 
     maize-evaluate ROOT MODELS [CLASSIFIER_DIR]     -> calibration.json, metrics.json, figures
-        written next to the chosen autoencoder (top row of MODELS/autoencoders.csv, e.g. MODELS/ae_vae/)
-        CLASSIFIER_DIR (e.g. MODELS/clf_mobilenet_v2) adds the classifier baseline
 """
 from __future__ import annotations
 
@@ -35,12 +20,11 @@ from scipy.stats import mannwhitneyu, spearmanr
 from maize.pipeline import HEALTHY, command_args, data_version, load, load_usable_manifest, select
 from maize.preprocess import AE_SIZE, CLS_SIZE, ERRORS, error_map, mask_background, usable_masks
 
-# Symptom colours for A(x), fixed before any autoencoder score was seen. OpenCV HSV: hue 0-179
-# (degrees / 2), saturation and value 0-255. Healthy green is hue ~35-85.
+# Symptom colours for A(x), fixed before any score was seen. OpenCV HSV: hue 0-179, healthy green ~35-85.
 SYMPTOM_RANGES = {
-    "yellowing": ((20, 60, 80), (34, 255, 255)),     # chlorosis: yellow, saturated, fairly bright
-    "brown lesion": ((5, 50, 30), (19, 255, 200)),   # necrosis: orange-brown to dark brown
-    "dead tissue": ((10, 0, 120), (30, 60, 255)),    # dried, straw-coloured tissue: pale, low saturation
+    "yellowing": ((20, 60, 80), (34, 255, 255)),
+    "brown lesion": ((5, 50, 30), (19, 255, 200)),
+    "dead tissue": ((10, 0, 120), (30, 60, 255)),
 }
 
 
@@ -118,7 +102,7 @@ def onnx_batch_size(session, default: int = 64) -> int:
 
 
 def classifier_p_diseased(classifier_dir: Path, images: np.ndarray) -> np.ndarray:
-    """1 - P(healthy) per image from the exported classifier (the same ONNX file the web app runs)."""
+    """1 - P(healthy) per image from the exported classifier."""
     import onnxruntime as ort
     session = ort.InferenceSession(str(classifier_dir / "classifier.onnx"), providers=["CPUExecutionProvider"])
     labels = json.loads((classifier_dir / "classifier.json").read_text())["labels"]
@@ -140,9 +124,9 @@ def disease_report(leaves: pd.DataFrame, healthy: pd.DataFrame) -> dict:
 
 
 def baseline_report(leaves: pd.DataFrame) -> dict:
-    """Spearman vs A(x) of the simple baselines on one disease, to compare with spearman_vs_area above."""
+    """Spearman vs A(x) of the simple baselines on one disease."""
     baselines = {"colour_distance": spearman(leaves["colour_distance"], leaves["area"])}
-    if leaves["p_diseased"].notna().all():  # only when a classifier was trained
+    if leaves["p_diseased"].notna().all():
         baselines["classifier_1_minus_p_healthy"] = spearman(leaves["p_diseased"], leaves["area"])
     return baselines
 
@@ -154,7 +138,7 @@ def report(test: pd.DataFrame, cal: dict, doubtful_mask_share: dict) -> dict:
     return {
         "error": cal["error"],
         "false_high_rate": float((healthy["error"] > cal["e_healthy_p95"]).mean()),
-        # the raw error, not the score: the score is clipped to 0 for most healthy leaves, so its spread is 0
+        # raw error, not the score: the score is 0 for most healthy leaves
         "within_group_error_sd": float(test.groupby("group")["error"].std().median()),
         "doubtful_mask_share": doubtful_mask_share,
         "diseases": {d: disease_report(leaves, healthy) for d, leaves in diseases.items()},
@@ -164,8 +148,7 @@ def report(test: pd.DataFrame, cal: dict, doubtful_mask_share: dict) -> dict:
 
 # ---- figures -------------------------------------------------------------------------------------
 def figures(rows: pd.DataFrame, autoencoder, root: Path, out: Path, sigma: float) -> None:
-    """error_by_class.png (test) and heatmaps.png (one test leaf per class: masked input, reconstruction,
-    error inside the leaf)."""
+    """error_by_class.png and heatmaps.png (one test leaf per class)."""
     import matplotlib.pyplot as plt
     plt.switch_backend("Agg")
     test = rows[rows["split"] == "test"]
@@ -195,7 +178,7 @@ def figures(rows: pd.DataFrame, autoencoder, root: Path, out: Path, sigma: float
 
 # ---- the step ------------------------------------------------------------------------------------
 def run(df: pd.DataFrame, root: Path, folder: Path, error: str = "plain", classifier_dir: Path | None = None) -> None:
-    """Writes calibration.json (used by the web app), metrics.json, scores.csv and figures to folder."""
+    """Writes calibration.json, metrics.json, test_scores.csv and figures to folder."""
     from maize.autoencoder import Autoencoder
 
     autoencoder = Autoencoder.load(folder)

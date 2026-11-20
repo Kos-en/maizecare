@@ -1,27 +1,8 @@
-"""The data pipeline (proposal 3.3-3.4) and the manifest it writes. Every image goes through it
-before any training.
+"""The data pipeline: check, group near copies, drop conflicts, split, cache images and leaf masks.
 
     maize-prepare RAW ROOT        RAW/<Class>/*.jpg in, ROOT/manifest.csv and image caches out
 
-  1. Read      new files only: content hash, perceptual hashes; must open and be >= 50 px   else bad_image / too_small
-  2. Group     a near copy is within 6 bits on BOTH pHash and aHash; chains of near copies form one group.
-               (Either hash alone chained 18,624 unrelated photos into one group on the real data, because
-               aHash only sees rough brightness layout. With both required: largest group 9 photos, and
-               cut-offs 2-6 give almost the same pairs, 5,171-5,293.)
-  3. Conflicts a group holding two classes is dropped whole (label_conflict); exact copies keep one (duplicate_exact)
-  4. Split     whole groups, stratified by class: within each class, groups in a fixed (hash) order fill
-               test, then val, then train until each holds 15% / 15% / 70% of that class's images
-  5. Cache     each usable image resized to 128 and 224 px, with its leaf mask (preprocess.prepare), in
-               ROOT/cache_<size>/ and ROOT/mask_v<version>_<size>/ keyed by sha1 (ArrayStore). Training reads
-               these with load(), so photos are never re-read; a new mask version is made from the cached
-               images. Saved every 4,000 images, so an interrupted run resumes.
-
-Re-run after adding photos: only the new files are read. Steps 2-4 are redone on the whole dataset,
-so the result never depends on the order images arrived (adding photos can move groups between
-splits, so retrain after adding data).
-
-The manifest (ROOT/manifest.csv) has one row per image: class, near-copy group, split and status.
-Training and evaluation read it with load_usable_manifest() and select(); only status "ok" rows are used.
+Re-run after adding photos: only new files are read, and grouping and splitting are redone on everything.
 """
 from __future__ import annotations
 
@@ -50,11 +31,11 @@ COLUMNS = ["path", "label", "sha1", "phash", "ahash", "group", "split", "status"
 IMAGE_TYPES = {".jpg", ".jpeg", ".png"}
 FILE_FAULTS = ["bad_image", "too_small"]  # facts about the file itself; every other status is recomputed
 MIN_SIDE = 50
-HAMMING = 6  # bits, on both hashes
+HAMMING = 6  # bits, on both hashes: either hash alone chained thousands of unrelated photos together
 TEST_FRAC = 0.15
 VAL_FRAC = 0.15
-SAVE_EVERY = 1000  # save while reading, so an interrupted run resumes instead of starting over
-CACHE_SAVE_EVERY = 4000  # images per cache part file: a crash loses at most this many
+SAVE_EVERY = 1000  # save while reading, so an interrupted run resumes
+CACHE_SAVE_EVERY = 4000  # images per cache part file
 
 
 # ---- the manifest -------------------------------------------------------------------------------
@@ -71,7 +52,7 @@ def save_manifest(df: pd.DataFrame, root: Path) -> None:
 
 
 def load_usable_manifest(root: Path) -> pd.DataFrame:
-    """The manifest, or a clear message if the data pipeline has not produced any usable images yet."""
+    """The manifest, or a clear message if there are no usable images yet."""
     df = load_manifest(root)
     if select(df).empty:
         raise SystemExit(f"No usable images in {root}/manifest.csv: run maize-prepare first.")
@@ -89,14 +70,14 @@ def select(df: pd.DataFrame, label: str | None = None, split: str | None = None)
 
 
 def data_version(df: pd.DataFrame) -> str:
-    """Short hash of which images are usable and their split, to trace a model back to its data."""
+    """Short hash of the usable images and their split, to trace a model back to its data."""
     ok = select(df)
     lines = sorted(ok["sha1"] + ":" + ok["split"])
     return hashlib.sha1("\n".join(lines).encode()).hexdigest()[:12]
 
 
 def command_args(usage: str, required: int) -> list[str]:
-    """The words typed after a maize-* command, or the usage line if too few were given."""
+    """The arguments of a maize-* command, or its usage line if too few were given."""
     args = sys.argv[1:]
     if len(args) < required:
         raise SystemExit(f"usage: {usage}")
@@ -105,7 +86,7 @@ def command_args(usage: str, required: int) -> list[str]:
 
 # ---- the pipeline -------------------------------------------------------------------------------
 class DataPipeline:
-    """Runs the steps in the module docstring in order on raw/<Class>/ images, keeping the manifest in self.df."""
+    """Runs the steps in order on raw/<Class>/ images, keeping the manifest in self.df."""
 
     def __init__(self, raw: Path, root: Path, hamming: int = HAMMING):
         self.raw, self.root, self.hamming = Path(raw), Path(root), hamming
@@ -121,12 +102,10 @@ class DataPipeline:
         return self.df
 
     def clean(self) -> None:
-        """Steps 2-4 on the whole manifest (no files needed)."""
         self.group_near_copies()
         self.drop_conflicts()
         self.split()
 
-    # step 1
     def read_new_images(self) -> None:
         known = set(self.df["path"])
         files = sorted(p for p in self.raw.rglob("*") if p.suffix.lower() in IMAGE_TYPES and p.parent != self.raw)
@@ -143,10 +122,9 @@ class DataPipeline:
         print(f"{len(files)} images in {self.raw}, {len(new_files)} new.")
 
     def relative(self, path: Path) -> str:
-        """Manifest paths are relative to the data root, so the data folder can move."""
+        """Paths are stored relative to the data root, so the data folder can move."""
         return os.path.relpath(path.resolve(), self.root.resolve())
 
-    # step 2
     def group_near_copies(self) -> None:
         df = self.df.sort_values("path", ignore_index=True)
         df["status"] = df["status"].where(df["status"].isin(FILE_FAULTS), "ok")
@@ -159,7 +137,6 @@ class DataPipeline:
         df.loc[readable, "group"] = connected_components(graph, directed=False)[1]  # A~B and B~C: one group
         self.df, self.pairs = df, readable.to_numpy()[pairs]
 
-    # step 3
     def drop_conflicts(self) -> None:
         df = self.df
         grouped = df[df["group"] >= 0]
@@ -167,23 +144,21 @@ class DataPipeline:
         df.loc[labels_in_group[labels_in_group > 1].index, "status"] = "label_conflict"
         df.loc[(df["status"] == "ok") & df.duplicated("sha1"), "status"] = "duplicate_exact"
 
-    # step 4
     def split(self) -> None:
+        """Whole groups, per class, in a fixed hash order fill test, then val, then train."""
         df = self.df
         usable = df[df["status"] == "ok"]
         groups = usable.groupby("group").agg(label=("label", "first"), key=("sha1", "min"), size=("sha1", "size"))
-        groups = groups.sort_values(["label", "key"])  # the hash order is effectively random, but fixed
+        groups = groups.sort_values(["label", "key"])
         placed_before = groups.groupby("label")["size"].cumsum() - groups["size"]
         share_before = placed_before / groups.groupby("label")["size"].transform("sum")
         df["split"] = ""
         df.loc[usable.index, "split"] = usable["group"].map(share_before.map(split_for))
 
-    # step 5
     def cache(self) -> None:
         for size in (AE_SIZE, CLS_SIZE):
             load(select(self.df), self.root, size)  # only photos not cached yet are read
 
-    # checks
     def count_leaks(self) -> int:
         """Near-copy pairs of usable images that sit in different splits. Must be 0."""
         usable = (self.df["status"] == "ok").to_numpy()
@@ -208,7 +183,7 @@ class DataPipeline:
         print(f"\nLeak check: {self.count_leaks()} near-copy pairs cross splits (must be 0).")
 
 
-# ---- steps 1-4: helpers ------------------------------------------------------------------------
+# ---- helpers ------------------------------------------------------------------------------------
 def inspect(path: Path) -> dict:
     """Content hash, perceptual hashes and file-check status of one image."""
     try:
@@ -223,17 +198,17 @@ def inspect(path: Path) -> dict:
 
 
 def popcount(x: np.ndarray) -> np.ndarray:
-    """Number of 1-bits in each uint64 (the Hamming distance, when x is an XOR of two hashes)."""
+    """Number of 1-bits in each uint64."""
     bits_in_byte = np.array([bin(i).count("1") for i in range(256)], np.uint8)
     return bits_in_byte[x.view(np.uint8).reshape(*x.shape, 8)].sum(-1)
 
 
 def near_pairs(df: pd.DataFrame, hamming: int = HAMMING, chunk: int = 512) -> np.ndarray:
-    """Row-position pairs (i, j), i < j, of near copies: within `hamming` bits on both pHash and aHash."""
+    """Row-position pairs (i, j), i < j, within `hamming` bits on both pHash and aHash."""
     ph = np.array([int(h, 16) for h in df["phash"]], np.uint64)
     ah = np.array([int(h, 16) for h in df["ahash"]], np.uint64)
     pairs = [np.empty((0, 2), np.int64)]
-    for start in range(0, len(df), chunk):  # compare a chunk of images against all images
+    for start in range(0, len(df), chunk):  # a chunk of images against all images
         dist = np.maximum(popcount(ph[start:start + chunk, None] ^ ph), popcount(ah[start:start + chunk, None] ^ ah))
         i, j = np.nonzero(dist <= hamming)
         i += start
@@ -242,7 +217,7 @@ def near_pairs(df: pd.DataFrame, hamming: int = HAMMING, chunk: int = 512) -> np
 
 
 def split_for(share_before: float) -> str:
-    """Split of a group, from the share of its class's images placed before it."""
+    """Split of a group, from the share of its class placed before it."""
     if share_before < TEST_FRAC:
         return "test"
     if share_before < TEST_FRAC + VAL_FRAC:
@@ -250,21 +225,20 @@ def split_for(share_before: float) -> str:
     return "train"
 
 
-# ---- step 5: the image + leaf mask cache, also read by training ----------------------------------
+# ---- the image + leaf mask cache ----------------------------------------------------------------
 class ArrayStore:
-    """One cache (e.g. ROOT/mask_v2_224): arrays keyed by sha1, loaded into memory.
+    """A cache of arrays keyed by sha1, loaded into memory.
 
-    On disk: ROOT/<name>.npz if an older run wrote one, plus ROOT/<name>/part_<n>.npz, one new file per
-    save. Files are only ever added, never overwritten: Google Drive twice served a damaged file after a
-    1.5 GB cache was overwritten several times in a row. A damaged part is skipped and its entries
-    recomputed. When a key is in several parts, the newest part wins."""
+    Stored as ROOT/<name>/part_<n>.npz, one new file per save, never overwritten (Google Drive served damaged
+    data after a large file was overwritten repeatedly). A single ROOT/<name>.npz from an older run is also read.
+    A damaged part is skipped and redone; for a key in several parts, the newest wins."""
 
     def __init__(self, path: Path, item_shape: tuple):
         self.folder = path.with_suffix("")
         self.keys, self.parts = [], [np.zeros((0, *item_shape), np.uint8)]
         files = sorted(self.folder.glob("part_*.npz"))
         if path.exists():
-            files.insert(0, path)  # the single file of an older run comes first, so newer parts win
+            files.insert(0, path)  # oldest first, so newer parts win
         for file in files:
             self.read(file)
 
@@ -289,7 +263,7 @@ class ArrayStore:
     def get(self, keys: pd.Series) -> np.ndarray:
         if len(self.parts) > 1:
             self.parts = [np.concatenate(self.parts)]
-        position = {k: i for i, k in enumerate(self.keys)}  # a later (newer) entry overwrites an earlier one
+        position = {k: i for i, k in enumerate(self.keys)}  # a later entry overwrites an earlier one
         return self.parts[0][[position[k] for k in keys]]
 
 
@@ -305,10 +279,10 @@ def in_chunks(rows: pd.DataFrame) -> list[pd.DataFrame]:
 
 
 def load(rows: pd.DataFrame, root: Path, size: int, workers: int = 8) -> tuple[np.ndarray, np.ndarray]:
-    """(images, masks) for the manifest rows, in the same order. A photo is read only if its image is not
-    cached yet; a missing mask is made from the cached image. Saved after every chunk."""
+    """(images, masks) for the manifest rows, in the same order. Photos are read only if not cached yet; a
+    missing mask is made from the cached image. Saved after every chunk."""
     images = ArrayStore(Path(root) / f"cache_{size}.npz", (size, size, 3))
-    masks = ArrayStore(Path(root) / f"mask_v{MASK_VERSION}_{size}.npz", (size, size))  # new mask code, new name
+    masks = ArrayStore(Path(root) / f"mask_v{MASK_VERSION}_{size}.npz", (size, size))
     wanted = rows.drop_duplicates("sha1")
 
     with ThreadPoolExecutor(workers) as pool:

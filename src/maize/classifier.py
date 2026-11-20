@@ -1,15 +1,7 @@
-"""Stage 1: which disease is it? (proposal 3.5.1)
-
-An ImageNet backbone with a new head: global average pooling, dropout 0.3, softmax. Phase 1 trains the
-head with the backbone frozen (Adam 1e-3); phase 2 fine-tunes the top of the backbone (1e-5). Class
-weights balance the classes. Early stopping on val loss decides when to stop; the weights kept are
-those of the epoch with the best val macro-F1. Several backbones are trained on the same split and
-compared: pick on val, report test.
-
-Input: RGB 224 x 224, values 0-255, the whole photo (not masked). Exported to ONNX for the web app.
+"""Stage 1: which disease is it? An ImageNet backbone with a new head, trained in two phases (head, then
+fine-tuning). Input: the whole RGB photo, 224 px, values 0-255.
 
     maize-train-classifier ROOT MODELS [BACKBONE ...]     default: all 4 backbones
-        -> MODELS/classifiers.csv (the comparison), MODELS/clf_<backbone>/
 """
 from __future__ import annotations
 
@@ -39,14 +31,13 @@ BACKBONES = {
 }
 MIN_CONFIDENCE = 0.6  # below this the app asks for a better photo instead of guessing
 UNFREEZE = 40         # backbone layers fine-tuned in phase 2
-EPOCHS = 10           # per phase; early stopping usually ends sooner
-SEED = 42             # same seed for every backbone, so results can be repeated
+EPOCHS = 10           # per phase
+SEED = 42
 PHASES = (("head", 1e-3, 0), ("finetune", 1e-5, UNFREEZE))  # (name, learning rate, layers unfrozen)
 
 
 class Batches(keras.utils.PyDataset):
-    """Feeds uint8 images (N, 224, 224, 3) and class numbers (N,) to Keras one float32 batch at a time,
-    so the whole dataset (several GB) never sits in memory as floats."""
+    """Images as float32 one batch at a time, so the whole dataset never sits in memory as floats."""
 
     def __init__(self, x: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool):
         super().__init__()
@@ -67,7 +58,7 @@ class Batches(keras.utils.PyDataset):
 
 
 def build(backbone: str, n_classes: int, weights: str | None = "imagenet") -> tuple[keras.Model, keras.Model]:
-    """Returns (model, backbone). The backbone is returned so training can freeze and unfreeze it."""
+    """Returns (model, backbone), so training can freeze and unfreeze the backbone."""
     make, preprocess = BACKBONES[backbone]
     base = make(include_top=False, weights=weights, input_shape=(CLS_SIZE, CLS_SIZE, 3))
     image = keras.Input((CLS_SIZE, CLS_SIZE, 3), name="image")
@@ -80,17 +71,15 @@ def build(backbone: str, n_classes: int, weights: str | None = "imagenet") -> tu
 
 
 def augmentation() -> list[layers.Layer]:
-    """Random changes applied while training only; the exported model has none. No hue changes:
-    yellowing is the disease signal."""
+    """Training-only changes. No hue changes: yellowing is the disease signal."""
     return [
         layers.RandomFlip("horizontal_and_vertical"),
         layers.RandomRotation(0.1),
         layers.RandomZoom(0.1),
         layers.RandomContrast(0.1),
-        layers.RandomBrightness(0.2),                                                  # darker / lighter photos
-        layers.RandomGaussianBlur(factor=0.3, kernel_size=5, value_range=(0, 255)),    # out-of-focus photos
-        # mild noise (about 4 of 255) stands in for JPEG compression, which Keras has no layer for;
-        # GaussianNoise only accepts 0-1 values, hence the rescaling around it
+        layers.RandomBrightness(0.2),
+        layers.RandomGaussianBlur(factor=0.3, kernel_size=5, value_range=(0, 255)),
+        # mild noise stands in for JPEG compression; GaussianNoise needs 0-1 values
         layers.Rescaling(1 / 255), layers.GaussianNoise(0.015), layers.Rescaling(255),
     ]
 
@@ -111,7 +100,7 @@ def expected_calibration_error(probs: np.ndarray, y: np.ndarray, bins: int = 10)
 
 
 class BestMacroF1(keras.callbacks.Callback):
-    """Keeps the weights of the epoch with the best val macro-F1 (proposal 3.5.1), across both phases."""
+    """Keeps the weights of the epoch with the best val macro-F1, across both phases."""
 
     def __init__(self, val: Batches):
         super().__init__()
@@ -170,7 +159,7 @@ class Classifier:
         }
 
     def save(self, folder: Path, info: dict) -> None:
-        """classifier.onnx for the web app, classifier.json with labels, settings and scores."""
+        """classifier.onnx and classifier.json (labels, settings, scores)."""
         folder.mkdir(parents=True, exist_ok=True)
         self.model.export(str(folder / "classifier.onnx"), format="onnx")
         info = {"backbone": self.backbone, "labels": self.labels, "img_size": CLS_SIZE,
@@ -190,7 +179,7 @@ def split_batches(df: pd.DataFrame, root: Path, labels: list[str], batch_size: i
 
 def train_all(df: pd.DataFrame, root: Path, out: Path, backbones: list[str], epochs: int,
               batch_size: int = 32) -> pd.DataFrame:
-    """Train each backbone on the same split; writes out/clf_<name>/. Returns one comparison row per backbone."""
+    """Train each backbone on the same split. One comparison row per backbone."""
     labels = sorted(select(df)["label"].unique())
     data = split_batches(df, root, labels, batch_size)
     table = []

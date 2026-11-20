@@ -1,27 +1,7 @@
-"""Stage 2: severity. Two autoencoders are trained on healthy leaves only, inside the leaf mask, and the one
-whose error best separates healthy from diseased validation leaves (on its weakest disease) is used
-(proposal 3.4 step 7, 3.5.2, eq. 3.2).
+"""Stage 2: severity. Autoencoders trained on healthy leaves only, inside the leaf mask. A diseased leaf is
+rebuilt badly, and that error becomes the severity score (evaluate.py).
 
-    conv   convolutional autoencoder
-    vae    variational autoencoder of the same shape (Kingma & Welling 2014)
-
-Encoder: 4 stride-2 conv blocks, 32 -> 256 filters (128 px -> 8 px), then a 1x1 conv down to LATENT = 32
-channels. The code holds 8 x 8 x 32 = 2,048 numbers for a 128 x 128 x 3 = 49,152-value image: 24x
-compression, so the model cannot just copy its input. The decoder mirrors the encoder.
-
-The VAE's encoder gives a mean and a spread for every code number. While training, the decoder rebuilds
-the leaf from a random draw within that spread and a KL penalty keeps the code close to a standard normal;
-this makes it harder to copy diseased leaves well. When scoring (and in the web app) it uses the mean.
-
-Background (outside the leaf mask) is set to 0 at the input and ignored by the loss and the error,
-so only leaf tissue counts. Photos whose leaf mask is doubtful (preprocess.MASK_OK) are left out.
-A diseased leaf reconstructs badly; evaluate.py turns its error into a 0-1 severity score.
-
-Each autoencoder is compared on val with both ways of measuring the error (preprocess.ERRORS: plain, or
-smoothed so fine texture stops counting). The best kind + error pair is the one used.
-
-    maize-train-autoencoder ROOT MODELS [KIND ...]     default: both kinds
-        -> MODELS/ae_<kind>/ and MODELS/autoencoders.csv (the comparison; the top row is used)
+    maize-train-autoencoder ROOT MODELS [KIND ...]     kinds: conv, vae (default: both)
 """
 from __future__ import annotations
 
@@ -42,12 +22,11 @@ from maize.pipeline import HEALTHY, command_args, load, load_usable_manifest, se
 from maize.preprocess import AE_SIZE, ERRORS, mask_background, reconstruction_error, usable_masks
 
 KINDS = ("conv", "vae")
-LATENT = 32       # code channels
-EPOCHS = 30       # early stopping usually ends sooner
+LATENT = 32       # code channels: 8 x 8 x 32 numbers for a 128 x 128 x 3 image, 24x smaller
+EPOCHS = 30
 SEED = 42
 MODEL_FILE = "autoencoder.keras"
-# Weight of the VAE's KL penalty (a mean over code numbers) against the squared error (a mean over leaf
-# values): 2,048 code numbers / 49,152 image values, the balance of the original VAE loss, where both are sums.
+# VAE KL weight: code size / image size, the balance of the original VAE loss
 BETA = (AE_SIZE // 16) ** 2 * LATENT / (AE_SIZE * AE_SIZE * 3)
 
 
@@ -131,8 +110,7 @@ class Autoencoder:
 
     def fit(self, train: tuple[np.ndarray, np.ndarray], val: tuple[np.ndarray, np.ndarray], epochs: int,
             batch_size: int = 64) -> pd.DataFrame:
-        """train, val: (images, masks). Early stopping on val loss keeps the best epoch.
-        Healthy leaves at 128 px are small enough to pass to Keras as plain arrays."""
+        """train, val: (images, masks). Early stopping on val loss keeps the best epoch."""
         def inputs_and_targets(images, masks):
             return mask_background(images, masks).astype("float32"), training_targets(images, masks)
 
@@ -145,8 +123,7 @@ class Autoencoder:
         return self.model.predict(mask_background(images, masks).astype("float32"), batch_size=64, verbose=0)
 
     def errors(self, images: np.ndarray, masks: np.ndarray, sigma: float = 0.0, chunk: int = 1024) -> np.ndarray:
-        """e(x) per image, in the order given; sigma > 0 smooths first (preprocess.ERRORS). In chunks,
-        so memory stays low."""
+        """Error per image, in chunks so memory stays low. sigma > 0 smooths first."""
         errors = []
         for start in range(0, len(images), chunk):
             part = slice(start, start + chunk)
@@ -171,15 +148,14 @@ def separation(labels: pd.Series, errors: pd.Series) -> dict:
 
 
 def compare(models: Path) -> pd.DataFrame:
-    """One row per trained autoencoder and way of measuring its error (MODELS/ae_<kind>/validation.json),
-    best first: highest AUROC on its weakest disease, because the target (AUROC >= 0.80) is per disease."""
+    """One row per autoencoder and error, best first: highest AUROC on its weakest disease."""
     rows = [{"kind": f.parent.name.removeprefix("ae_"), "error": error, **result}
             for f in Path(models).glob("ae_*/validation.json")
             for error, result in json.loads(f.read_text()).items()]
     if not rows:
         raise SystemExit(f"No trained autoencoder in {models}: run maize-train-autoencoder first.")
     table = pd.DataFrame(rows)
-    table["worst_auroc"] = table.filter(like="auroc_").min(axis=1)  # also for validation.json from older runs
+    table["worst_auroc"] = table.filter(like="auroc_").min(axis=1)
     return table.sort_values(["worst_auroc", "mean_auroc"], ascending=False, ignore_index=True)
 
 
@@ -191,7 +167,7 @@ def chosen(models: Path) -> tuple[Path, str]:
 
 # ---- the step ------------------------------------------------------------------------------------
 def usable_leaves(rows: pd.DataFrame, root: Path) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
-    """The rows, images and masks whose leaf mask is usable (preprocess.MASK_OK)."""
+    """The rows, images and masks whose leaf mask is usable."""
     images, masks = load(rows, root, AE_SIZE)
     ok = usable_masks(masks)
     print(f"  {int(ok.sum())} of {len(ok)} images have a usable leaf mask.", flush=True)
@@ -199,8 +175,7 @@ def usable_leaves(rows: pd.DataFrame, root: Path) -> tuple[pd.DataFrame, np.ndar
 
 
 def train(df: pd.DataFrame, root: Path, out: Path, kinds=KINDS, epochs: int = EPOCHS) -> pd.DataFrame:
-    """Healthy train leaves to learn, healthy val leaves for early stopping, all val leaves to compare.
-    Writes out/ae_<kind>/ for each kind and out/autoencoders.csv."""
+    """Learn on healthy train leaves, stop early on healthy val leaves, compare on all val leaves."""
     _, train_images, train_masks = usable_leaves(select(df, HEALTHY, "train"), root)
     _, healthy_val_images, healthy_val_masks = usable_leaves(select(df, HEALTHY, "val"), root)
     val_rows, val_images, val_masks = usable_leaves(select(df, split="val"), root)

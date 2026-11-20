@@ -1,12 +1,8 @@
-"""FastAPI app: classifies a leaf photo, grades its severity, and serves the built frontend.
+"""FastAPI app: GET /health, POST /api/score (photo -> disease, confidence, 0-1 severity), / for the web page.
 
     uvicorn maize.serve:app --port 8000
 
-GET /health, POST /api/score (image -> disease label + confidence, 0-1 severity), / for the frontend.
-Stage 1 is the Keras classifier (classifier.onnx), stage 2 the healthy-only autoencoder (model.onnx).
-Photos are processed in memory, never stored. With no model files the app still starts
-and /api/score returns 503, so a first deploy works. Heat maps are for developers only
-(maize-evaluate); see docs/observability.md.
+Photos are handled in memory, never stored. Without the model files /api/score returns 503.
 """
 from __future__ import annotations
 
@@ -40,9 +36,7 @@ def onnx_runner(path: Path) -> Run:
 
 
 class Scorer:
-    """classify: (1,224,224,3) RGB 0-255 -> class probabilities.
-    reconstruct: (1,128,128,3) leaf-masked RGB 0-255 -> its reconstruction in 0-1 by the healthy-only autoencoder.
-    The error is measured inside the leaf mask, with the same functions used in training."""
+    """Both models on one photo: the classifier's answer and the autoencoder's severity score."""
 
     def __init__(self, classify: Run, reconstruct: Run, classes: dict, calibration: dict):
         self.classify, self.reconstruct = classify, reconstruct
@@ -60,7 +54,7 @@ class Scorer:
         image, mask = prepare(rgb, AE_SIZE)
         images, masks = image[None], mask[None]
         recons = self.reconstruct(mask_background(images, masks).astype(np.float32))
-        e = float(reconstruction_error(images, recons, masks, self.cal.get("smooth_sigma", 0.0))[0])  # as calibrated
+        e = float(reconstruction_error(images, recons, masks, self.cal.get("smooth_sigma", 0.0))[0])
         med, p99 = self.cal["e_healthy_median"], self.cal["e_disease_p99"]
         return {
             "label": self.labels[top],
