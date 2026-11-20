@@ -1,6 +1,6 @@
 # Use of AI assistance
 
-Following the course policy, here's where I used AI in this project.
+Following the project policy, here's where I used AI in this project.
 
 I used Claude Code (by Anthropic), an AI coding assistant, for the following:
 
