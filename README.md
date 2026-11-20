@@ -73,7 +73,7 @@ The data, the image caches and the trained models live on Google Drive, so a Col
 nothing. Training needs a GPU (an L4 was used); everything else runs on a CPU.
 
 ```bash
-cd /content && git clone -b mask-and-severity https://github.com/Kos-en/maizecare repo && cd repo
+cd /content && git clone https://github.com/Kos-en/maizecare repo && cd repo
 pip install -q --no-deps -e . && pip install -q imagehash onnx onnxscript onnxruntime
 export KERAS_BACKEND=torch D=/content/drive/MyDrive M=/content/drive/MyDrive/maize_models
 
@@ -166,18 +166,18 @@ in [docs/observability.md](docs/observability.md).
 extra from the lock, so production runs exactly what CI tested.
 
 On every push and pull request, `.github/workflows/ci.yml` runs ruff, pytest, `pip-audit` on the shipped
-dependencies, `npm audit` and the frontend build. On a push to `main` it also builds the image, pushes it to
-`ghcr.io/kos-en/maizecare` (tagged `latest` and the commit SHA) and tells Render to deploy that exact image.
-Dependabot opens weekly update PRs.
+dependencies, `npm audit` and the frontend build. On a push to `main` it also builds the image and pushes it to
+`ghcr.io/kos-en/maizecare`. Dependabot opens weekly update PRs.
 
-One-time setup on Render (free plan):
-1. Push to `main` once so the image exists in GHCR, then make the package public (GitHub -> Packages -> maize ->
-   Package settings), or add GHCR credentials in Render.
-2. Render -> New -> Web Service -> Existing image -> `ghcr.io/kos-en/maizecare:latest`, plan Free, health check
-   path `/health` (or put the URL in `render.yaml` and use New -> Blueprint).
-3. Copy the service's Deploy Hook URL (Settings) into the GitHub repo secret `RENDER_DEPLOY_HOOK_URL`.
+**Deploying on Render (free plan).** Render builds the `Dockerfile` itself, straight from GitHub:
 
-Free instances sleep after 15 minutes idle, so the first request after that takes about a minute.
+1. Render -> New -> Web Service -> connect the GitHub repo `Kos-en/maizecare`, branch `main`.
+2. Language: Docker (detected from the `Dockerfile`). Instance type: Free.
+3. Advanced -> Health Check Path: `/health`. Create the service.
+
+Every push to `main` then redeploys automatically. (Or use New -> Blueprint, which reads the same settings from
+`render.yaml`.) Render sets `PORT` itself, and the image listens on it. Free instances sleep after 15 minutes
+idle, so the first request after that takes about a minute.
 
 ## Not built yet
 

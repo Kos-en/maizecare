@@ -1,10 +1,10 @@
-# Render Blueprint: the image is built and pushed by GitHub Actions (.github/workflows/ci.yml);
-# Render only runs it.
+# Render Blueprint (New -> Blueprint): Render builds the Dockerfile from this repo and redeploys on every push to main.
 services:
   - type: web
-    name: maize-severity
-    runtime: image
-    image:
-      url: ghcr.io/kos-en/maizecare:latest
+    name: maizecare
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    branch: main
     plan: free
     healthCheckPath: /health
+    autoDeploy: true

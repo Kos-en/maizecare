@@ -1,4 +1,5 @@
-# Every push / PR: lint, test, audit. Push to main: build the image, push it to GHCR, deploy it on Render.
+# Every push / PR: lint, test, audit. Push to main: build the image and push it to GHCR. Render builds and deploys
+# main from the Dockerfile itself; the deploy hook below only runs if the RENDER_DEPLOY_HOOK_URL secret is set.
 name: ci
 on:
   push:
@@ -60,4 +61,6 @@ jobs:
         env:
           HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
           IMG: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
-        run: curl -fsS -X POST "$HOOK&imgURL=$(jq -rn --arg v "$IMG" '$v|@uri')"
+        run: |
+          if [ -z "$HOOK" ]; then echo "No deploy hook set: Render deploys from the repo."; exit 0; fi
+          curl -fsS -X POST "$HOOK&imgURL=$(jq -rn --arg v "$IMG" '$v|@uri')"
