@@ -10,8 +10,7 @@ photo, in English or Kiswahili:
 2. **How severe?** An autoencoder trained only on healthy leaves tries to rebuild the leaf. The worse it rebuilds
    it, the more diseased the leaf. This gives a 0-1 severity score without any severity labels.
 
-**New here?** [ARCHITECTURE.md](ARCHITECTURE.md) explains the system with simple diagrams.
-[REPORT.md](REPORT.md) is the final report (problem, approach, results, limitations), and
+**New here?** [ARCHITECTURE.md](ARCHITECTURE.md) explains the system with simple diagrams, and
 [notebooks/maizecare.ipynb](notebooks/maizecare.ipynb) shows every step with the trained models.
 
 ```mermaid
@@ -34,7 +33,7 @@ flowchart LR
 | Trained models (serialized) | [`release/`](release/): `classifier.onnx`, `classifier.json`, `model.onnx`, `calibration.json` |
 | Dockerfile | [`Dockerfile`](Dockerfile) |
 | API service | [`src/maize/serve.py`](src/maize/serve.py) (FastAPI) |
-| Final report | [REPORT.md](REPORT.md), with the figures in the [results notebook](notebooks/maizecare.ipynb) |
+| Results and figures | the [results notebook](notebooks/maizecare.ipynb) |
 
 ```
 src/maize/
@@ -178,9 +177,3 @@ dependencies, `npm audit` and the frontend build. On a push to `main` it also bu
 Every push to `main` then redeploys automatically. (Or use New -> Blueprint, which reads the same settings from
 `render.yaml`.) Render sets `PORT` itself, and the image listens on it. Free instances sleep after 15 minutes
 idle, so the first request after that takes about a minute.
-
-## Not built yet
-
-From the proposal: the data source per image (Tanzania / Uganda) and results per source, bootstrap confidence
-intervals and McNemar's test, Grad-CAM, by-eye severity ratings, and a quality gate in the app. The limitations
-are discussed in [REPORT.md](REPORT.md).
